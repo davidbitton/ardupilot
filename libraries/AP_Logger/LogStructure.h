@@ -1148,10 +1148,10 @@ struct PACKED log_PSCZ {
 // @Field: Mar: Margin from path to obstacle on best yaw chosen
 // @Field: DLt: Destination latitude
 // @Field: DLg: Destination longitude
-// @Field: DAlt: Desired alt
+// @Field: DAlt: Desired alt above EKF Origin
 // @Field: OLt: Intermediate location chosen for avoidance
 // @Field: OLg: Intermediate location chosen for avoidance
-// @Field: OAlt: Intermediate alt chosen for avoidance
+// @Field: OAlt: Intermediate alt chosen for avoidance above EKF origin
 
 // @LoggerMessage: OADJ
 // @Description: Object avoidance (Dijkstra) diagnostics
@@ -1499,7 +1499,7 @@ LOG_STRUCTURE_FROM_CAMERA \
     { LOG_SRTL_MSG, sizeof(log_SRTL), \
       "SRTL", "QBHHBfff", "TimeUS,Active,NumPts,MaxPts,Action,N,E,D", "s----mmm", "F----000" }, \
     { LOG_OA_BENDYRULER_MSG, sizeof(log_OABendyRuler), \
-      "OABR","QBBHHHBfLLfLLf","TimeUS,Type,Act,DYaw,Yaw,DP,RChg,Mar,DLt,DLg,DAlt,OLt,OLg,OAlt", "s-bddd-mDUmDUm", "F-------GGBGGB" }, \
+      "OABR","QBBHHHBfLLiLLi","TimeUS,Type,Act,DYaw,Yaw,DP,RChg,Mar,DLt,DLg,DAlt,OLt,OLg,OAlt", "s-bddd-mDUmDUm", "F-------GGBGGB" }, \
     { LOG_OA_DIJKSTRA_MSG, sizeof(log_OADijkstra), \
       "OADJ","QBBBBLLLL","TimeUS,State,Err,CurrPoint,TotPoints,DLat,DLng,OALat,OALng", "sbbbbDUDU", "F----GGGG" }, \
     { LOG_SIMPLE_AVOID_MSG, sizeof(log_SimpleAvoid), \
@@ -1528,6 +1528,10 @@ LOG_STRUCTURE_FROM_CAMERA \
       "PIDA", PID_FMT,  PID_LABELS, PID_UNITS, PID_MULTS }, \
     { LOG_PIDS_MSG, sizeof(log_PID), \
       "PIDS", PID_FMT,  PID_LABELS, PID_UNITS, PID_MULTS }, \
+    { LOG_PIDN_MSG, sizeof(log_PID), \
+      "PIDN", PID_FMT,  PID_LABELS, PID_UNITS, PID_MULTS }, \
+    { LOG_PIDE_MSG, sizeof(log_PID), \
+      "PIDE", PID_FMT,  PID_LABELS, PID_UNITS, PID_MULTS }, \
     { LOG_DSTL_MSG, sizeof(log_DSTL), \
       "DSTL", "QBfLLeccfeffff", "TimeUS,Stg,THdg,Lat,Lng,Alt,XT,Travel,L1I,Loiter,Des,P,I,D", "s??DUm--------", "F??000--------" }, \
     { LOG_VIBE_MSG, sizeof(log_Vibe), \
@@ -1645,6 +1649,8 @@ enum LogMessages : uint8_t {
     LOG_PIDY_MSG,
     LOG_PIDA_MSG,
     LOG_PIDS_MSG,
+    LOG_PIDN_MSG,
+    LOG_PIDE_MSG,
     LOG_DSTL_MSG,
     LOG_VIBE_MSG,
     LOG_RPM_MSG,

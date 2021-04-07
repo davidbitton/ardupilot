@@ -968,8 +968,8 @@ class FRSkySPort(FRSky):
         return ret
 
     def check_poll(self):
-        self.progress("check poll")
         now = self.get_time()
+        # self.progress("check poll (%u)" % now)
 
         # sometimes ArduPilot will not respond to a poll - for
         # example, if you poll an unhealthy RPM sensor then we will
@@ -1199,7 +1199,7 @@ class AutoTest(ABC):
                  binary,
                  valgrind=False,
                  gdb=False,
-                 speedup=8,
+                 speedup=None,
                  frame=None,
                  params=None,
                  gdbserver=False,
@@ -1230,6 +1230,8 @@ class AutoTest(ABC):
         self.breakpoints = breakpoints
         self.disable_breakpoints = disable_breakpoints
         self.speedup = speedup
+        if self.speedup is None:
+            self.speedup = self.default_speedup()
         self.sup_binaries = sup_binaries
 
         self.mavproxy = None
@@ -1272,10 +1274,13 @@ class AutoTest(ABC):
 
     def __del__(self):
         if self.rc_thread is not None:
-            self.progress("Joining thread in __del__")
+            self.progress("Joining RC thread in __del__")
             self.rc_thread_should_quit = True
             self.rc_thread.join()
             self.rc_thread = None
+
+    def default_speedup(self):
+        return 8
 
     def progress(self, text, send_statustext=True):
         """Display autotest progress text."""
@@ -1344,7 +1349,6 @@ class AutoTest(ABC):
         ret = [
             '--sitl=127.0.0.1:5502',
             '--streamrate=%u' % self.sitl_streamrate(),
-            '--cmd="set heartbeat %u"' % self.speedup,
             '--target-system=%u' % self.sysid_thismav(),
             '--target-component=1',
         ]
@@ -1566,6 +1570,16 @@ class AutoTest(ABC):
 
     def reboot_sitl_mav(self, required_bootcount=None):
         """Reboot SITL instance using mavlink and wait for it to reconnect."""
+        # we must make sure that stats have been reset - otherwise
+        # when we reboot we'll reset statistics again and lose our
+        # STAT_BOOTCNT increment:
+        tstart = time.time()
+        while True:
+            if time.time() - tstart > 30:
+                raise NotAchievedException("STAT_RESET did not go non-zero")
+            if self.get_parameter('STAT_RESET') != 0:
+                break
+
         old_bootcount = self.get_parameter('STAT_BOOTCNT')
         # ardupilot SITL may actually NAK the reboot; replace with
         # run_cmd when we don't do that.
@@ -2187,14 +2201,10 @@ class AutoTest(ABC):
 
     def close(self):
         """Tidy up after running all tests."""
-        if self.use_map:
-            self.mavproxy.send("module unload map\n")
-            self.mavproxy.expect("Unloaded module map")
 
         if self.mav is not None:
             self.mav.close()
             self.mav = None
-        util.pexpect_close(self.mavproxy)
         self.stop_SITL()
 
         valgrind_log = util.valgrind_log_filepath(binary=self.binary,
@@ -2496,10 +2506,11 @@ class AutoTest(ABC):
         if m is not None:
             raise NotAchievedException("Received extra LOG_ENTRY?!")
 
-        # download  the 6th and seventh byte of the fifth log
         log_id = 5
         ofs = 6
         count = 2
+        self.start_subtest("downloading %u bytes from offset %u from log_id %u" %
+                           (count, ofs, log_id))
         self.mav.mav.log_request_data_send(self.sysid_thismav(),
                                            1, # target component
                                            log_id,
@@ -2526,10 +2537,9 @@ class AutoTest(ABC):
         if m.data[1] != actual_bytes[1]:
             raise NotAchievedException("Bad second byte")
 
-        # make file contents available
-        # download an entire file
         log_id = 7
         log_filepath = self.log_filepath(log_id)
+        self.start_subtest("Downloading log id %u (%s)" % (log_id, log_filepath))
         with open(log_filepath, "rb") as bob:
             actual_bytes = bytearray(bob.read())
 
@@ -2626,8 +2636,10 @@ class AutoTest(ABC):
                                            (len(actual_bytes), len(data_downloaded)))
             self.assert_bytes_equal(actual_bytes, data_downloaded)
 
-        # ... and now download it reading backwards...
+        self.start_subtest("Download log backwards")
         bytes_to_read = bytes_to_fetch
+        if log_entry.size < bytes_to_read:
+            bytes_to_read = log_entry.size
         bytes_read = 0
         backwards_data_downloaded = []
         last_print = 0
@@ -2653,7 +2665,9 @@ class AutoTest(ABC):
             if m is None:
                 raise NotAchievedException("Did not get reply")
             if m.count == 0:
-                raise NotAchievedException("xZero bytes read")
+                raise NotAchievedException("xZero bytes read (ofs=%u)" % (ofs,))
+            if m.count > bytes_to_fetch:
+                raise NotAchievedException("Read too many bytes?!")
             stuff = m.data[0:m.count]
             stuff.extend(backwards_data_downloaded)
             backwards_data_downloaded = stuff
@@ -3465,6 +3479,7 @@ class AutoTest(ABC):
                     bad_channels += " (ch=%u want=%u got=%u)" % (chan, map_copy[chan], chan_pwm)
                     break
             if len(bad_channels) == 0:
+                self.progress("RC values good")
                 break
             self.progress("RC values bad:%s" % bad_channels)
             if not self.rc_thread.is_alive():
@@ -4114,6 +4129,13 @@ class AutoTest(ABC):
             return
         context.collections[msg_type] = []
 
+    def context_collection(self, msg_type):
+        '''return messages in collection'''
+        context = self.context_get()
+        if msg_type not in context.collections:
+            raise NotAchievedException("Not collecting (%s)" % str(msg_type))
+        return context.collections[msg_type]
+
     def context_clear_collection(self, msg_type):
         '''clear collection of message type msg_type'''
         context = self.context_get()
@@ -4669,12 +4691,15 @@ class AutoTest(ABC):
     #################################################
     # WAIT UTILITIES
     #################################################
-    def delay_sim_time(self, seconds_to_wait):
+    def delay_sim_time(self, seconds_to_wait, reason=None):
         """Wait some second in SITL time."""
-        self.drain_mav_unparsed()
+        self.drain_mav()
         tstart = self.get_sim_time()
         tnow = tstart
-        self.progress("Delaying %f seconds" % (seconds_to_wait,))
+        r = "Delaying %f seconds"
+        if reason is not None:
+            r += " for %s" % reason
+        self.progress(r % (seconds_to_wait,))
         while tstart + seconds_to_wait > tnow:
             tnow = self.get_sim_time()
 
@@ -5386,7 +5411,7 @@ Also, ignores heartbeats not from our target system'''
 
     def wait_ekf_flags(self, required_value, error_bits, timeout=30):
         self.progress("Waiting for EKF value %u" % required_value)
-        self.drain_mav_unparsed()
+        self.drain_mav()
         last_print_time = 0
         tstart = self.get_sim_time()
         while timeout is None or self.get_sim_time_cached() < tstart + timeout:
@@ -5440,22 +5465,28 @@ Also, ignores heartbeats not from our target system'''
         raise AutoTestTimeoutException("Failed to get EKF.flags=%u disabled" % not_required_value)
 
     def wait_text(self, *args, **kwargs):
-        return self.wait_statustext(*args, **kwargs)
+        '''wait for text to appear from vehicle, return that text'''
+        statustext = self.wait_statustext(*args, **kwargs)
+        if statustext is None:
+            return None
+        return statustext.text
 
     def statustext_in_collections(self, text, regex=False):
+        '''searches for text in STATUSTEXT collection, returns message if found'''
         c = self.context_get()
         if "STATUSTEXT" not in c.collections:
             raise NotAchievedException("Asked to check context but it isn't collecting!")
-        for statustext in [x.text for x in c.collections["STATUSTEXT"]]:
+        for x in c.collections["STATUSTEXT"]:
+            self.progress("  statustext=%s vs text=%s" % (x.text, text))
             if regex:
-                if re.match(text, statustext):
-                    return statustext
-            elif text.lower() in statustext.lower():
-                return statustext
+                if re.match(text, x.text):
+                    return x
+            elif text.lower() in x.text.lower():
+                return x
         return None
 
     def wait_statustext(self, text, timeout=20, the_function=None, check_context=False, regex=False, wallclock_timeout=False):
-        """Wait for a specific STATUSTEXT."""
+        """Wait for a specific STATUSTEXT, return that statustext message"""
 
         # Statustexts are often triggered by something we've just
         # done, so we have to be careful not to read any traffic that
@@ -5484,11 +5515,11 @@ Also, ignores heartbeats not from our target system'''
                 self.re_match = re.match(text, m.text)
                 if self.re_match:
                     statustext_found = True
-                    statustext_full = m.text
+                    statustext_full = m
             if text.lower() in m.text.lower():
                 self.progress("Received expected text: %s" % m.text.lower())
                 statustext_found = True
-                statustext_full = m.text
+                statustext_full = m
 
         self.install_message_hook(mh)
         if wallclock_timeout:
@@ -5671,6 +5702,10 @@ Also, ignores heartbeats not from our target system'''
 
         if self._mavproxy is not None:
             self.progress("Stopping auto-started mavproxy")
+            if self.use_map:
+                self.mavproxy.send("module unload map\n")
+                self.mavproxy.expect("Unloaded module map")
+
             self.expect_list_remove(self._mavproxy)
             util.pexpect_close(self._mavproxy)
             self._mavproxy = None
@@ -5812,7 +5847,6 @@ Also, ignores heartbeats not from our target system'''
         return self.sitl.isalive()
 
     def autostart_mavproxy(self):
-        return False
         return self.use_map
 
     def init(self):
@@ -5839,10 +5873,8 @@ Also, ignores heartbeats not from our target system'''
             self.mavproxy = self.start_mavproxy()
 
         self.expect_list_clear()
-        if len(self.sup_prog):
-            self.expect_list_extend([self.sitl, self.mavproxy])
-        else:
-            self.expect_list_extend([self.sitl, self.mavproxy] + self.sup_prog)
+        self.expect_list_extend([self.sitl, self.mavproxy])
+        self.expect_list_extend(self.sup_prog)
 
         # need to wait for a heartbeat to arrive as then mavutil will
         # select the correct set of messages for us to receive in
@@ -5937,7 +5969,7 @@ Also, ignores heartbeats not from our target system'''
         '''mavlink2 required'''
         target_system = 1
         target_component = 1
-        self.drain_mav_unparsed()
+        self.drain_mav()
         self.progress("Sending mission_request_list")
         tstart = self.get_sim_time()
         self.mav.mav.mission_request_list_send(target_system,
@@ -7525,7 +7557,7 @@ Also, ignores heartbeats not from our target system'''
     def poll_message(self, message_id, timeout=10):
         if type(message_id) == str:
             message_id = eval("mavutil.mavlink.MAVLINK_MSG_ID_%s" % message_id)
-        self.drain_mav_unparsed()
+        self.drain_mav()
         tstart = self.get_sim_time() # required for timeout in run_cmd_get_ack to work
         self.send_poll_message(message_id)
         self.run_cmd_get_ack(
@@ -8585,7 +8617,7 @@ switch value'''
                     self.check_logs("FRAMEWORK")
 
         if self.rc_thread is not None:
-            self.progress("Joining thread")
+            self.progress("Joining RC thread")
             self.rc_thread_should_quit = True
             self.rc_thread.join()
             self.rc_thread = None
@@ -9342,7 +9374,7 @@ switch value'''
         self.progress("received param (0x%02x) (id=%u value=%u)" %
                       (value, param_id, param_value))
         frame_type = param_value
-        hb = self.wait_heartbeat()
+        hb = self.mav.messages['HEARTBEAT']
         hb_type = hb.type
         self.progress("validate_params: HEARTBEAT type==%f frsky==%f param_id=%u" % (hb_type, frame_type, param_id))
         if param_id != 1:
@@ -9390,7 +9422,8 @@ switch value'''
         while len(wants):
             self.progress("Still wanting (%s)" % ",".join([("0x%02x" % x) for x in wants.keys()]))
             wants_copy = copy.copy(wants)
-            t2 = self.get_sim_time()
+            self.drain_mav()
+            t2 = self.get_sim_time_cached()
             if t2 - tstart > 300:
                 self.progress("Failed to get frsky passthrough data")
                 self.progress("Counts of sensor_id polls sent:")
@@ -9425,17 +9458,24 @@ switch value'''
         # test we get statustext strings.  This relies on ArduPilot
         # emitting statustext strings when we fetch parameters. (or,
         # now, an updating-barometer statustext)
-        tstart = self.get_sim_time_cached()
+        tstart = self.get_sim_time()
         old_data = None
         text = ""
-        target_text = self.mav.recv_match(
-            type='STATUSTEXT',
-            blocking=True,
-            timeout=10
-        )
-        self.progress("Got STATUSTEXT: %s, waiting for same text from frsky" % target_text.text)
+        self.context_collect('STATUSTEXT')
+        self.run_cmd(mavutil.mavlink.MAV_CMD_PREFLIGHT_CALIBRATION,
+                     0, # p1
+                     0, # p2
+                     1, # p3, baro
+                     0, # p4
+                     0, # p5
+                     0, # p6
+                     0) # p7
+
+        received_frsky_texts = []
+        last_len_received_statustexts = 0
         while True:
-            now = self.get_sim_time()
+            self.drain_mav()
+            now = self.get_sim_time_cached()
             if now - tstart > 60: # it can take a *long* time to get these messages down!
                 raise NotAchievedException("Did not get statustext in time")
             frsky.update()
@@ -9459,14 +9499,32 @@ switch value'''
                 if (x & 0x7f) == 0x00:
                     last = True
             if last:
-                m = re.match(target_text.text, text)
+                m = None
+                text = text.rstrip("\0")
+                self.progress("Received frsky text (%s)" % (text,))
+                self.progress("context texts: %s" % str([x.text for x in self.context_collection('STATUSTEXT')]))
+                m = self.statustext_in_collections(text)
                 if m is not None:
-                    want_sev = target_text.severity
+                    want_sev = m.severity
                     if severity != want_sev:
                         raise NotAchievedException("Incorrect severity; want=%u got=%u" % (want_sev, severity))
-                    self.progress("Got statustext (%s)" % m.group(0))
+                    self.progress("Got statustext (%s)" % m.text)
                     break
+                received_frsky_texts.append((severity, text))
                 text = ""
+            received_statustexts = self.context_collection('STATUSTEXT')
+            if len(received_statustexts) != last_len_received_statustexts:
+                last_len_received_statustexts = len(received_statustexts)
+                self.progress("received statustexts: %s" % str([x.text for x in received_statustexts]))
+                self.progress("received frsky texts: %s" % str(received_frsky_texts))
+                for (want_sev, text) in received_frsky_texts:
+                    for m in received_statustexts:
+                        if m.text == text:
+                            if want_sev != m.severity:
+                                raise NotAchievedException("Incorrect severity; want=%u got=%u" % (want_sev, severity))
+                            self.progress("Got statustext (%s)" % text)
+                            break
+        self.context_stop_collecting('STATUSTEXT')
 
         self.wait_ready_to_arm()
 

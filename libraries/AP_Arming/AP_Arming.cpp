@@ -414,6 +414,12 @@ bool AP_Arming::compass_checks(bool report)
     if ((checks_to_perform) & ARMING_CHECK_ALL ||
         (checks_to_perform) & ARMING_CHECK_COMPASS) {
 
+        // check for first compass being disabled but 2nd or 3rd being enabled
+        if (!_compass.use_for_yaw(0) && (_compass.get_num_enabled() > 0)) {
+            check_failed(ARMING_CHECK_COMPASS, report, "Compass1 disabled but others enabled");
+            return false;
+        }
+
         // avoid Compass::use_for_yaw(void) as it implicitly calls healthy() which can
         // incorrectly skip the remaining checks, pass the primary instance directly
         if (!_compass.use_for_yaw(0)) {
@@ -843,6 +849,7 @@ bool AP_Arming::system_checks(bool report)
 // check nothing is too close to vehicle
 bool AP_Arming::proximity_checks(bool report) const
 {
+#if HAL_PROXIMITY_ENABLED
     const AP_Proximity *proximity = AP::proximity();
     // return true immediately if no sensor present
     if (proximity == nullptr) {
@@ -857,6 +864,7 @@ bool AP_Arming::proximity_checks(bool report) const
         check_failed(report, "check proximity sensor");
         return false;
     }
+#endif
 
     return true;
 }

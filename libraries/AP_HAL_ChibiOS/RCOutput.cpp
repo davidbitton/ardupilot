@@ -52,6 +52,9 @@ const uint8_t RCOutput::NUM_GROUPS = ARRAY_SIZE(RCOutput::pwm_group_list);
 
 // event mask for triggering a PWM send
 static const eventmask_t EVT_PWM_SEND  = EVENT_MASK(11);
+static const eventmask_t EVT_PWM_START  = EVENT_MASK(12);
+static const eventmask_t EVT_PWM_SYNTHETIC_SEND  = EVENT_MASK(13);
+static const eventmask_t EVT_PWM_SEND_NEXT  = EVENT_MASK(14);
 
 // marker for a disabled channel
 #define CHAN_DISABLED 255
@@ -98,6 +101,7 @@ void RCOutput::init()
     }
 #endif
     chMtxObjectInit(&trigger_mutex);
+    chVTObjectInit(&_dshot_rate_timer);
 
     // setup default output rate of 50Hz
     set_freq(0xFFFF ^ ((1U<<chan_offset)-1), 50);
@@ -122,6 +126,7 @@ void RCOutput::init()
 void RCOutput::rcout_thread()
 {
     uint32_t last_thread_run_us = 0; // last time we did a 1kHz run of rcout
+    uint32_t last_cycle_run_us = 0;
 
     rcout_thread_ctx = chThdGetSelfX();
 
@@ -130,33 +135,94 @@ void RCOutput::rcout_thread()
         hal.scheduler->delay_microseconds(1000);
     }
 
+    chEvtWaitOne(EVT_PWM_START);
+
+    // it takes BLHeli32 about 30ms to calibrate frames on startup, in which it must see 10 good frames
+    // experiments show that this is quite fragile at lower rates, so run a calibration phase at a
+    // higher rate (2Khz) for 5s to get the motors armed before dropping the rate to the configured value
+    uint32_t cal_cycles = 5000000UL / 300UL;
+    _dshot_calibrating = true;
+    const uint32_t cycle_time_us = _dshot_period_us;
+    // while calibrating run at 2.5Khz to allow arming, this is the fastest rate that dshot150 can manage
+    _dshot_period_us = 400;
+
+    // prime the pump for calibration
+    chEvtSignal(rcout_thread_ctx, EVT_PWM_SYNTHETIC_SEND);
+
+    // don't start calibrating until everything else is ready
+    chEvtWaitOne(EVT_PWM_SEND);
+
+    // dshot is quite sensitive to timing, it's important to output pulses as
+    // regularly as possible at the correct bitrate
     while (true) {
-        const uint32_t period_us = AP_HAL::micros() - last_thread_run_us;
-        if (period_us < 1000) {
-            chEvtWaitOneTimeout(EVT_PWM_SEND, chTimeUS2I(1000 - period_us));
+        // while calibrating ignore all push-based requests and stick closely to the dshot period
+        if (_dshot_calibrating) {
+            chEvtWaitOne(EVT_PWM_SYNTHETIC_SEND);
+        } else {
+            chEvtWaitOne(EVT_PWM_SEND | EVT_PWM_SYNTHETIC_SEND);
         }
+
         // start the clock
         last_thread_run_us = AP_HAL::micros();
 
-        // main thread requested a new dshot send
+        // this is when the cycle is supposed to start
+        if (_dshot_cycle == 0) {
+            last_cycle_run_us = AP_HAL::micros();
+            // register a timer for the next tick if push() will not be providing it
+            if (_dshot_rate != 1 || _dshot_calibrating) {
+                chVTSet(&_dshot_rate_timer, chTimeUS2I(_dshot_period_us), dshot_update_tick, this);
+            }
+        }
+
+        // if DMA sharing is in effect there can be quite a delay between the request to begin the cycle and
+        // actually sending out data - thus we need to work out how much time we have left to collect the locks
+        uint32_t time_out_us = (_dshot_cycle + 1) * _dshot_period_us + last_cycle_run_us;
+        if (!_dshot_rate) {
+            time_out_us = last_thread_run_us + _dshot_period_us;
+        }
+
+        // main thread requested a new dshot send or we timed out - if we are not running
+        // as a multiple of loop rate then ignore EVT_PWM_SEND events to preserve periodicity
         if (!serial_group) {
-            // do a blocking send now, to guarantee DShot sends at
-            // above 1000 Hz. This makes the protocol more reliable on
-            // long cables, and also keeps some ESCs happy that don't
-            // like low rates
-            dshot_send_groups();
+            dshot_send_groups(time_out_us);
+
             // now unlock everything
-            dshot_collect_dma_locks(last_thread_run_us);
+            dshot_collect_dma_locks(time_out_us);
+
+            if (_dshot_rate > 0) {
+                _dshot_cycle = (_dshot_cycle + 1) % _dshot_rate;
+            }
         }
 
         // process any pending RC output requests
-        timer_tick(last_thread_run_us);
+        timer_tick(time_out_us);
+
+        if (_dshot_calibrating) {
+                cal_cycles--;
+                if (cal_cycles == 0) {
+                    // calibration is done re-instate the desired rate
+                    _dshot_calibrating = false;
+                    _dshot_period_us = cycle_time_us;
+                }
+        }
     }
+}
+
+void RCOutput::dshot_update_tick(void* p)
+{
+    chSysLockFromISR();
+    RCOutput* rcout = (RCOutput*)p;
+
+    if (rcout->_dshot_cycle + 1 < rcout->_dshot_rate || rcout->_dshot_calibrating) {
+        chVTSetI(&rcout->_dshot_rate_timer, chTimeUS2I(rcout->_dshot_period_us), dshot_update_tick, p);
+    }
+    chEvtSignalI(rcout->rcout_thread_ctx, EVT_PWM_SYNTHETIC_SEND);
+    chSysUnlockFromISR();
 }
 
 #ifndef HAL_NO_SHARED_DMA
 // release locks on the groups that are pending in reverse order
-void RCOutput::dshot_collect_dma_locks(uint32_t last_run_us)
+void RCOutput::dshot_collect_dma_locks(uint32_t time_out_us)
 {
     if (NUM_GROUPS == 0) {
         return;
@@ -165,11 +231,17 @@ void RCOutput::dshot_collect_dma_locks(uint32_t last_run_us)
         pwm_group &group = pwm_group_list[i];
         if (group.dma_handle != nullptr && group.dma_handle->is_locked()) {
             // calculate how long we have left
-            const uint32_t deltat = AP_HAL::micros() - last_run_us;
+            uint32_t now = AP_HAL::micros();
             // if we have time left wait for the event
             eventmask_t mask = 0;
-            if (deltat < 1000) {
-                mask = chEvtWaitOneTimeout(group.dshot_event_mask, chTimeUS2I(1000 - deltat));
+            const uint32_t pulse_elapsed_us = now - group.last_dmar_send_us;
+            if (now < time_out_us) {
+                mask = chEvtWaitOneTimeout(group.dshot_event_mask,
+                    chTimeUS2I(MAX(time_out_us - now, group.dshot_pulse_send_time_us - pulse_elapsed_us)));
+            } else if (pulse_elapsed_us < group.dshot_pulse_send_time_us) {
+                // better to let the burst write in progress complete rather than cancelling mid way through
+                mask = chEvtWaitOneTimeout(group.dshot_event_mask,
+                    chTimeUS2I(group.dshot_pulse_send_time_us - pulse_elapsed_us));
             }
             // no time left cancel and restart
             if (!mask) {
@@ -343,6 +415,50 @@ void RCOutput::set_default_rate(uint16_t freq_hz)
             pwmChangePeriod(group.pwm_drv, group.pwm_cfg.period);
         }
     }
+}
+
+/*
+  Set the dshot rate as a multiple of the loop rate.
+  This is called late after init_ardupilot() so groups will have been setup
+ */
+void RCOutput::set_dshot_rate(uint8_t dshot_rate, uint16_t loop_rate_hz)
+{
+    // for low loop rates simply output at 1Khz on a timer
+    if (loop_rate_hz <= 100 || dshot_rate == 0) {
+        _dshot_period_us = 1000UL;
+        _dshot_rate = 0;
+        chEvtSignal(rcout_thread_ctx, EVT_PWM_START);
+        return;
+    }
+    // if there are non-dshot channels then do likewise
+    for (auto &group : pwm_group_list) {
+        if (group.current_mode == MODE_PWM_ONESHOT ||
+            group.current_mode == MODE_PWM_ONESHOT125 ||
+            group.current_mode == MODE_PWM_BRUSHED) {
+            _dshot_period_us = 1000UL;
+            _dshot_rate = 0;
+            chEvtSignal(rcout_thread_ctx, EVT_PWM_START);
+            return;
+        }
+    }
+
+    uint16_t drate = dshot_rate * loop_rate_hz;
+    _dshot_rate = dshot_rate;
+    // BLHeli32 uses a 16 bit counter for input calibration which at 48Mhz will wrap
+    // at 732Hz so never allow rates below 800hz
+    while (drate < 800) {
+        _dshot_rate++;
+        drate = _dshot_rate * loop_rate_hz;
+    }
+    // prevent stupidly high rates, ideally should also prevent high rates
+    // with slower dshot variants
+    if (drate > 4000) {
+        _dshot_rate = 4000 / loop_rate_hz;
+        drate = _dshot_rate * loop_rate_hz;
+    }
+    _dshot_period_us = 1000000UL / drate;
+
+    chEvtSignal(rcout_thread_ctx, EVT_PWM_START);
 }
 
 /*
@@ -631,7 +747,7 @@ bool RCOutput::setup_group_DMA(pwm_group &group, uint32_t bitrate, uint32_t bit_
         group.dma_buffer_len = buffer_length;
     }
     // reset the pulse time inside the lock
-    group.dshot_pulse_time_us = pulse_time_us;
+    group.dshot_pulse_time_us = group.dshot_pulse_send_time_us = pulse_time_us;
 
 #ifdef HAL_WITH_BIDIR_DSHOT
     // configure input capture DMA if required
@@ -648,41 +764,29 @@ bool RCOutput::setup_group_DMA(pwm_group &group, uint32_t bitrate, uint32_t bit_
         group.pwm_started = false;
     }
 
-    // adjust frequency to give an allowed value given the
-    // clock. There is probably a better way to do this
-    const uint32_t original_bitrate = bitrate;
-    uint32_t freq = 0;
-    uint32_t target_frequency = bitrate * bit_width;
-    while (true) {
-        uint32_t clock_hz = group.pwm_drv->clock;
-        target_frequency = bitrate * bit_width;
-        uint32_t prescaler = clock_hz / target_frequency;
-        freq = clock_hz / prescaler;
-        // hal.console->printf("CLOCK=%u BW=%u FREQ=%u PRE=%u BR=%u\n", clock_hz, bit_width, freq/bit_width, prescaler, bitrate);
-        if (prescaler > 0x8000) {
-            group.dma_handle->unlock();
-            return false;
-        }
-        if (!choose_high) {
-            break;
-        }
-        // we want to choose a frequency that gives at least the
-        // target, erring on the high side not low side
-        uint32_t actual_bitrate = freq / bit_width;
-        if (actual_bitrate >= original_bitrate || bitrate < 10000) {
-            break;
-        }
-        bitrate += 10000;
-        if (bitrate >= 2 * original_bitrate) {
-            break;
-        }
+    // original prescaler calculation from betaflight. bi-dir dshot is incredibly sensitive to the bitrate
+    const uint32_t target_frequency = bitrate * bit_width;
+    uint32_t prescaler = uint32_t(lrintf((float) group.pwm_drv->clock / (bitrate * bit_width) + 0.01f) - 1);
+    uint32_t freq = group.pwm_drv->clock / prescaler;
+    if (freq > target_frequency && !choose_high) {
+        prescaler++;
+    } else if (freq < target_frequency && choose_high) {
+        prescaler--;
+    }
+    if (prescaler > 0x8000) {
+        group.dma_handle->unlock();
+        return false;
     }
 
+    freq = group.pwm_drv->clock / prescaler;
     group.pwm_cfg.frequency = freq;
     group.pwm_cfg.period = bit_width;
     group.pwm_cfg.dier = TIM_DIER_UDE;
     group.pwm_cfg.cr2 = 0;
     group.bit_width_mul = (freq + (target_frequency/2)) / target_frequency;
+
+    //hal.console->printf("CLOCK=%u BW=%u FREQ=%u BR=%u MUL=%u PRE=%u\n", unsigned(group.pwm_drv->clock), unsigned(bit_width), unsigned(group.pwm_cfg.frequency),
+    //    unsigned(bitrate), unsigned(group.bit_width_mul), unsigned(prescaler));
 
     for (uint8_t j=0; j<4; j++) {
         pwmmode_t mode = group.pwm_cfg.channels[j].mode;
@@ -775,7 +879,8 @@ void RCOutput::set_group_mode(pwm_group &group)
 
         // configure timer driver for DMAR at requested rate
         if (!setup_group_DMA(group, rate, bit_period, active_high,
-            MAX(DSHOT_BUFFER_LENGTH, GCR_TELEMETRY_BUFFER_LEN), false, pulse_send_time_us)) {
+            // choosing the low frequency for DSHOT150 is based on experimentation with BLHeli32 and bi-directional dshot
+            MAX(DSHOT_BUFFER_LENGTH, GCR_TELEMETRY_BUFFER_LEN), group.current_mode != MODE_PWM_DSHOT150, pulse_send_time_us)) {
             group.current_mode = MODE_PWM_NORMAL;
             break;
         }
@@ -1013,7 +1118,7 @@ void RCOutput::trigger_groups(void)
   periodic timer. This is used for oneshot and dshot modes, plus for
   safety switch update. Runs every 1000us.
  */
-void RCOutput::timer_tick(uint32_t last_run_us)
+void RCOutput::timer_tick(uint32_t time_out_us)
 {
     safety_update();
 
@@ -1022,14 +1127,14 @@ void RCOutput::timer_tick(uint32_t last_run_us)
     }
 
     // if we have enough time left send out LED data
-    if (serial_led_pending && AP_HAL::micros() - last_run_us < 500) {
+    if (serial_led_pending && (time_out_us > (AP_HAL::micros() + (_dshot_period_us >> 1)))) {
         serial_led_pending = false;
         for (auto &group : pwm_group_list) {
             serial_led_pending |= !serial_led_send(group);
         }
 
         // release locks on the groups that are pending in reverse order
-        dshot_collect_dma_locks(last_run_us);
+        dshot_collect_dma_locks(time_out_us);
     }
 
     if (min_pulse_trigger_us == 0) {
@@ -1046,23 +1151,26 @@ void RCOutput::timer_tick(uint32_t last_run_us)
 }
 
 // send dshot for all groups that support it
-void RCOutput::dshot_send_groups()
+void RCOutput::dshot_send_groups(uint32_t time_out_us)
 {
     if (serial_group) {
         return;
     }
-
     // actually do a dshot send
     for (auto &group : pwm_group_list) {
         if (group.can_send_dshot_pulse()) {
-            dshot_send(group);
-            // delay sending the next group by the same amount as the IRQ dead time
-            // to avoid irq collisions
-            if (group.bdshot.enabled) {
-                hal.scheduler->delay_microseconds(10U);
-            }
+            dshot_send(group, time_out_us);
         }
     }
+}
+
+void RCOutput::dshot_send_next_group(void* p)
+{
+    chSysLockFromISR();
+    RCOutput* rcout = (RCOutput*)p;
+
+    chEvtSignalI(rcout->rcout_thread_ctx, EVT_PWM_SEND_NEXT);
+    chSysUnlockFromISR();
 }
 
 /*
@@ -1154,7 +1262,7 @@ void RCOutput::fill_DMA_buffer_dshot(uint32_t *buffer, uint8_t stride, uint16_t 
   This call be called in blocking mode from the timer, in which case it waits for the DMA lock.
   In normal operation it doesn't wait for the DMA lock.
  */
-void RCOutput::dshot_send(pwm_group &group)
+void RCOutput::dshot_send(pwm_group &group, uint32_t time_out_us)
 {
 #ifndef DISABLE_DSHOT
     if (irq.waiter || (group.dshot_state != DshotState::IDLE && group.dshot_state != DshotState::RECV_COMPLETE)) {
@@ -1165,6 +1273,14 @@ void RCOutput::dshot_send(pwm_group &group)
     // first make sure we have the DMA channel before anything else
     osalDbgAssert(!group.dma_handle->is_locked(), "DMA handle is already locked");
     group.dma_handle->lock();
+
+    // if we are sharing UP channels then it might have taken a long time to get here,
+    // if there's not enough time to actually send a pulse then cancel
+    if (AP_HAL::micros() + group.dshot_pulse_time_us > time_out_us) {
+        group.dma_handle->unlock();
+        return;
+    }
+
     // only the timer thread releases the locks
     group.dshot_waiter = rcout_thread_ctx;
 #ifdef HAL_WITH_BIDIR_DSHOT
@@ -1253,7 +1369,8 @@ void RCOutput::dshot_send(pwm_group &group)
                 value += 47;
             }
 
-            bool request_telemetry = (telem_request_mask & chan_mask)?true:false;
+            // according to sskaug requesting telemetry while trying to arm may interfere with the good frame calc
+            bool request_telemetry = (telem_request_mask & chan_mask) ? !_dshot_calibrating : false;
             uint16_t packet = create_dshot_packet(value, request_telemetry, group.bdshot.enabled);
             if (request_telemetry) {
                 telem_request_mask &= ~chan_mask;
@@ -1333,16 +1450,18 @@ void RCOutput::send_pulses_DMAR(pwm_group &group, uint32_t buffer_length)
     stm32_cacheBufferFlush(group.dma_buffer, buffer_length);
     dmaStreamSetMemory0(group.dma, group.dma_buffer);
     dmaStreamSetTransactionSize(group.dma, buffer_length/sizeof(uint32_t));
+#ifdef STM32_DMA_FCR_FTH_FULL
     dmaStreamSetFIFO(group.dma, STM32_DMA_FCR_DMDIS | STM32_DMA_FCR_FTH_FULL);
+#endif
     dmaStreamSetMode(group.dma,
                      STM32_DMA_CR_CHSEL(group.dma_up_channel) |
                      STM32_DMA_CR_DIR_M2P | STM32_DMA_CR_PSIZE_WORD | STM32_DMA_CR_MSIZE_WORD |
                      STM32_DMA_CR_MINC | STM32_DMA_CR_PL(3) |
                      STM32_DMA_CR_TEIE | STM32_DMA_CR_TCIE);
 
-    // setup for 4 burst strided transfers. 0x0D is the register
-    // address offset of the CCR registers in the timer peripheral
-    group.pwm_drv->tim->DCR = 0x0D | STM32_TIM_DCR_DBL(3);
+    // setup for burst strided transfers into the timers 4 CCR registers
+    const uint8_t ccr_ofs = offsetof(stm32_tim_t, CCR)/4;
+    group.pwm_drv->tim->DCR = STM32_TIM_DCR_DBA(ccr_ofs) | STM32_TIM_DCR_DBL(3);
     group.dshot_state = DshotState::SEND_START;
 
     TOGGLE_PIN_DEBUG(54);
@@ -1404,8 +1523,16 @@ void RCOutput::dma_cancel(pwm_group& group)
         dmaStreamDisable(group.bdshot.ic_dma[group.bdshot.curr_telem_chan]);
     }
 #endif
+    // normally the CCR registers are reset by the final 0 in the DMA buffer
+    // since we are cancelling early they need to be reset to avoid infinite pulses
+    for (uint8_t i = 0; i < 4; i++) {
+        if (group.chan[i] != CHAN_DISABLED) {
+            group.pwm_drv->tim->CCR[i] = 0;
+        }
+    }
     chVTResetI(&group.dma_timeout);
     chEvtGetAndClearEventsI(group.dshot_event_mask);
+
     group.dshot_state = DshotState::IDLE;
     chSysUnlock();
 }
@@ -1563,7 +1690,7 @@ bool RCOutput::serial_write_bytes(const uint8_t *bytes, uint16_t len)
  */
 void RCOutput::serial_bit_irq(void)
 {
-    systime_t now = chVTGetSystemTimeX();
+    uint32_t now = AP_HAL::micros();
     uint8_t bit = palReadLine(irq.line);
     bool send_signal = false;
 

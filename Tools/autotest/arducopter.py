@@ -16,8 +16,9 @@ import numpy
 
 from pymavlink import mavutil
 from pymavlink import mavextra
+from pymavlink import rotmat
 
-from pysim import util, rotmat
+from pysim import util
 
 from common import AutoTest
 from common import NotAchievedException, AutoTestTimeoutException, PreconditionFailedException
@@ -147,7 +148,10 @@ class AutoTestCopter(AutoTest):
             self.wait_ready_to_arm(require_absolute=require_absolute, timeout=timeout)
             self.zero_throttle()
             self.arm_vehicle()
-        self.set_rc(3, takeoff_throttle)
+        if mode == 'GUIDED':
+            self.user_takeoff(alt_min=alt_min)
+        else:
+            self.set_rc(3, takeoff_throttle)
         self.wait_for_alt(alt_min=alt_min, timeout=timeout)
         self.hover()
         self.progress("TAKEOFF COMPLETE")
@@ -323,7 +327,7 @@ class AutoTestCopter(AutoTest):
     # fly a square in alt_hold mode
     def fly_square(self, side=50, timeout=300):
 
-        self.takeoff(10, mode="ALT_HOLD")
+        self.takeoff(20, mode="ALT_HOLD")
 
         """Fly a square, flying N then E ."""
         tstart = self.get_sim_time()
@@ -398,7 +402,7 @@ class AutoTestCopter(AutoTest):
         # descend to 10m
         self.progress("Descend to 10m in Loiter")
         self.change_mode('LOITER')
-        self.set_rc(3, 1300)
+        self.set_rc(3, 1200)
         time_left = timeout - (self.get_sim_time() - tstart)
         self.progress("timeleft = %u" % time_left)
         if time_left < 20:
@@ -1262,7 +1266,7 @@ class AutoTestCopter(AutoTest):
         # first east
         self.progress("turn east")
         self.set_rc(4, 1580)
-        self.wait_heading(160)
+        self.wait_heading(160, timeout=60)
         self.set_rc(4, 1500)
 
         fence_radius = self.get_parameter("FENCE_RADIUS")
@@ -1327,7 +1331,7 @@ class AutoTestCopter(AutoTest):
         # first east
         self.progress("turning east")
         self.set_rc(4, 1580)
-        self.wait_heading(160)
+        self.wait_heading(160, timeout=60)
         self.set_rc(4, 1500)
 
         self.progress("flying east 20m")
@@ -1365,7 +1369,7 @@ class AutoTestCopter(AutoTest):
         # first east
         self.progress("turn east")
         self.set_rc(4, 1580)
-        self.wait_heading(160)
+        self.wait_heading(160, timeout=60)
         self.set_rc(4, 1500)
 
         # fly forward (east) at least 20m
@@ -2116,8 +2120,8 @@ class AutoTestCopter(AutoTest):
 
         self.reboot_sitl()
         # Test UAVCAN GPS ordering working
-        gps1_det_text = self.wait_statustext("GPS 1: specified as UAVCAN.*", regex=True, check_context=True)
-        gps2_det_text = self.wait_statustext("GPS 2: specified as UAVCAN.*", regex=True, check_context=True)
+        gps1_det_text = self.wait_text("GPS 1: specified as UAVCAN.*", regex=True, check_context=True)
+        gps2_det_text = self.wait_text("GPS 2: specified as UAVCAN.*", regex=True, check_context=True)
         gps1_nodeid = int(gps1_det_text.split('-')[1])
         gps2_nodeid = int(gps2_det_text.split('-')[1])
         if gps1_nodeid is None or gps2_nodeid is None:
@@ -2145,11 +2149,11 @@ class AutoTestCopter(AutoTest):
             gps1_det_text = None
             gps2_det_text = None
             try:
-                gps1_det_text = self.wait_statustext("GPS 1: specified as UAVCAN.*", regex=True, check_context=True)
+                gps1_det_text = self.wait_text("GPS 1: specified as UAVCAN.*", regex=True, check_context=True)
             except AutoTestTimeoutException:
                 pass
             try:
-                gps2_det_text = self.wait_statustext("GPS 2: specified as UAVCAN.*", regex=True, check_context=True)
+                gps2_det_text = self.wait_text("GPS 2: specified as UAVCAN.*", regex=True, check_context=True)
             except AutoTestTimeoutException:
                 pass
 
@@ -2585,7 +2589,7 @@ class AutoTestCopter(AutoTest):
         self.change_mode('AUTO')
         self.wait_groundspeed(0-tolerance, 0+tolerance)
         self.wait_groundspeed(wpnav_speed_ms-tolerance, wpnav_speed_ms+tolerance)
-        self.monitor_groundspeed(wpnav_speed_ms, timeout=5)
+        self.monitor_groundspeed(wpnav_speed_ms, tolerance=0.6, timeout=5)
         self.do_RTL()
 
     def fly_nav_delay(self):
@@ -2608,7 +2612,7 @@ class AutoTestCopter(AutoTest):
         last_seq = None
         while self.armed(): # we RTL at end of mission
             now = self.get_sim_time_cached()
-            if now - tstart > 120:
+            if now - tstart > 200:
                 raise AutoTestTimeoutException("Did not disarm as expected")
             m = self.mav.recv_match(type='MISSION_CURRENT', blocking=True)
             at_delay_item = ""
@@ -5691,7 +5695,7 @@ class AutoTestCopter(AutoTest):
             # Test for pre-arm check fail when state is not running
             self.start_subtest("If you haven't taken off generator error should cause instant failsafe and disarm")
             self.set_parameter("SIM_IE24_STATE", 8)
-            self.wait_statustext("Status not running")
+            self.wait_statustext("Status not running", timeout=40)
             self.try_arm(result=False,
                          expect_msg="Status not running")
             self.set_parameter("SIM_IE24_STATE", 2) # Explicitly set state to running
@@ -5737,6 +5741,17 @@ class AutoTestCopter(AutoTest):
         self.drain_mav()
         self.wait_current_waypoint(0, timeout=10)
         self.set_rc(7, 1000)
+
+    def test_aux_functions_in_mission(self):
+        self.load_mission("aux_functions.txt")
+        self.change_mode('LOITER')
+        self.wait_ready_to_arm()
+        self.arm_vehicle()
+        self.change_mode('AUTO')
+        self.set_rc(3, 1500)
+        self.wait_mode('ALT_HOLD')
+        self.change_mode('AUTO')
+        self.wait_rtl_complete()
 
     def fly_rangefinder_drivers_fly(self, rangefinders):
         '''ensure rangefinder gives height-above-ground'''
@@ -6485,6 +6500,31 @@ class AutoTestCopter(AutoTest):
         if not ok:
             raise NotAchievedException("check_replay failed")
 
+    def test_copter_gps_zero(self):
+        # https://github.com/ArduPilot/ardupilot/issues/14236
+        self.progress("arm the vehicle and takeoff in Guided")
+        self.takeoff(20, mode='GUIDED')
+        self.progress("fly 50m North (or whatever)")
+        old_pos = self.mav.recv_match(type='GLOBAL_POSITION_INT', blocking=True)
+        self.fly_guided_move_global_relative_alt(50, 0, 20)
+        self.set_parameter('GPS_TYPE', 0)
+        self.drain_mav()
+        tstart = self.get_sim_time()
+        while True:
+            if self.get_sim_time_cached() - tstart > 30 and self.mode_is('LAND'):
+                self.progress("Bug not reproduced")
+                break
+            m = self.mav.recv_match(type='GLOBAL_POSITION_INT', blocking=True, timeout=1)
+            self.progress("Received (%s)" % str(m))
+            if m is None:
+                raise NotAchievedException("No GLOBAL_POSITION_INT?!")
+            pos_delta = self.get_distance_int(old_pos, m)
+            self.progress("Distance: %f" % pos_delta)
+            if pos_delta < 5:
+                raise NotAchievedException("Bug reproduced - returned to near origin")
+        self.wait_disarmed()
+        self.reboot_sitl()
+
     # a wrapper around all the 1A,1B,1C..etc tests for travis
     def tests1(self):
         ret = ([])
@@ -6542,6 +6582,10 @@ class AutoTestCopter(AutoTest):
             ("AuxSwitchOptions",
              "Test random aux mode options",
              self.test_aux_switch_options),
+
+            ("AuxFunctionsInMission",
+             "Test use of auxilliary functions in missions",
+             self.test_aux_functions_in_mission),
 
             ("AutoTune",
              "Fly AUTOTUNE mode",
@@ -6843,6 +6887,10 @@ class AutoTestCopter(AutoTest):
                  self.fly_dynamic_notches,
                  attempts=4),
 
+            Test("PositionWhenGPSIsZero",
+                 "Ensure position doesn't zero when GPS lost",
+                 self.test_copter_gps_zero),
+
             Test("GyroFFT",
                  "Fly Gyro FFT",
                  self.fly_gyro_fft,
@@ -6935,6 +6983,10 @@ class AutoTestHeli(AutoTestCopter):
 
     def sitl_start_location(self):
         return SITL_START_LOCATION_AVC
+
+    def default_speedup(self):
+        '''Heli seems to be race-free'''
+        return 100
 
     def is_heli(self):
         return True

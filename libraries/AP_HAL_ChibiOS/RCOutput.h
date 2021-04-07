@@ -24,7 +24,7 @@
 
 #if HAL_USE_PWM == TRUE
 
-#if !STM32_DMA_ADVANCED
+#if !STM32_DMA_ADVANCED && !defined(STM32G4)
 #define DISABLE_DSHOT
 #endif
 
@@ -149,6 +149,11 @@ public:
      */
     void set_bidir_dshot_mask(uint16_t mask) override;
 #endif
+
+    /*
+      Set the dshot rate as a multiple of the loop rate
+     */
+    void set_dshot_rate(uint8_t dshot_rate, uint16_t loop_rate_hz) override;
 
     /*
       get safety switch state, used by Util.cpp
@@ -350,7 +355,7 @@ private:
         ioline_t line;
 
         // time the current byte started
-        systime_t byte_start_tick;
+        uint32_t byte_start_tick;
 
         // number of bits we have read in this byte
         uint8_t nbits;
@@ -361,8 +366,8 @@ private:
         // value of completed byte (includes start and stop bits)
         uint16_t byteval;
 
-        // expected time per bit in system ticks
-        systime_t bit_time_tick;
+        // expected time per bit in micros
+        uint32_t bit_time_tick;
 
         // the bit value of the last bit received
         uint8_t last_bit;
@@ -413,6 +418,17 @@ private:
         uint32_t erpm_last_stats_ms[max_channels];
 #endif
     } _bdshot;
+
+    // dshot period
+    uint32_t _dshot_period_us;
+    // dshot rate as a multiple of loop rate or 0 for 1Khz
+    uint8_t _dshot_rate;
+    // dshot periods since the last push()
+    uint8_t _dshot_cycle;
+    // in the very even pulse calibration step
+    bool _dshot_calibrating;
+    // virtual timer for post-push() pulses
+    virtual_timer_t _dshot_rate_timer;
 
     uint16_t safe_pwm[max_channels]; // pwm to use when safety is on
     bool corked;
@@ -482,8 +498,10 @@ private:
     uint16_t create_dshot_packet(const uint16_t value, bool telem_request, bool bidir_telem);
     void fill_DMA_buffer_dshot(uint32_t *buffer, uint8_t stride, uint16_t packet, uint16_t clockmul);
 
-    void dshot_send_groups();
-    void dshot_send(pwm_group &group);
+    void dshot_send_groups(uint32_t time_out_us);
+    void dshot_send(pwm_group &group, uint32_t time_out_us);
+    static void dshot_update_tick(void* p);
+    static void dshot_send_next_group(void* p);
     // release locks on the groups that are pending in reverse order
     void dshot_collect_dma_locks(uint32_t last_run_us);
     static void dma_up_irq_callback(void *p, uint32_t flags);
