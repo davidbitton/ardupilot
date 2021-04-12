@@ -2082,10 +2082,8 @@ bool RCOutput::set_serial_led_num_LEDs(const uint16_t chan, uint8_t num_leds, ou
     }
 
     WITH_SEMAPHORE(grp->serial_led_mutex);
-
-    // group is already setup correctly
-    if ((grp->serial_nleds >= num_leds) && (mode == grp->current_mode)) {
-        return true;
+    if (num_leds == 0 || (mode != MODE_NEOPIXEL && mode != MODE_PROFILED)) {
+        return false;
     }
 
     // we cant add more or change the type after the first setup
