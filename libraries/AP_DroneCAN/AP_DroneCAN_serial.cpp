@@ -38,12 +38,10 @@ void AP_DroneCAN_Serial::init(AP_DroneCAN *_dronecan)
     const uint8_t base_port = driver_index == 0? AP_SERIALMANAGER_CAN_D1_PORT_1 : AP_SERIALMANAGER_CAN_D2_PORT_1;
     bool need_subscriber = false;
 
-    // init in reverse order to keep the linked list in
-    // AP_SerialManager in the right order
-    for (int8_t i=ARRAY_SIZE(ports)-1; i>= 0; i--) {
+    for (uint8_t i=0; i<ARRAY_SIZE(ports); i++) {
         auto &p = ports[i];
         p.state.idx = base_port + i;
-        if (p.node > 0) {
+        if (p.node > 0 && p.idx >= 0) {
             p.init();
             AP::serialmanager().register_port(&p);
             need_subscriber = true;
@@ -73,7 +71,7 @@ void AP_DroneCAN_Serial::update(void)
         if (p.baudrate == 0) {
             continue;
         }
-        if (p.writebuffer == nullptr) {
+        if (p.writebuffer == nullptr || p.node <= 0 || p.idx < 0) {
             continue;
         }
         WITH_SEMAPHORE(p.sem);
