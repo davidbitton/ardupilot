@@ -27,6 +27,37 @@
 #include "AP_SerialManager.h"
 #include <GCS_MAVLink/GCS.h>
 
+#ifndef HAL_HAVE_SERIAL0
+#define HAL_HAVE_SERIAL0 HAL_NUM_SERIAL_PORTS > 0
+#endif
+#ifndef HAL_HAVE_SERIAL1
+#define HAL_HAVE_SERIAL1 HAL_NUM_SERIAL_PORTS > 1
+#endif
+#ifndef HAL_HAVE_SERIAL2
+#define HAL_HAVE_SERIAL2 HAL_NUM_SERIAL_PORTS > 2
+#endif
+#ifndef HAL_HAVE_SERIAL3
+#define HAL_HAVE_SERIAL3 HAL_NUM_SERIAL_PORTS > 3
+#endif
+#ifndef HAL_HAVE_SERIAL4
+#define HAL_HAVE_SERIAL4 HAL_NUM_SERIAL_PORTS > 4
+#endif
+#ifndef HAL_HAVE_SERIAL5
+#define HAL_HAVE_SERIAL5 HAL_NUM_SERIAL_PORTS > 5
+#endif
+#ifndef HAL_HAVE_SERIAL6
+#define HAL_HAVE_SERIAL6 HAL_NUM_SERIAL_PORTS > 6
+#endif
+#ifndef HAL_HAVE_SERIAL7
+#define HAL_HAVE_SERIAL7 HAL_NUM_SERIAL_PORTS > 7
+#endif
+#ifndef HAL_HAVE_SERIAL8
+#define HAL_HAVE_SERIAL8 HAL_NUM_SERIAL_PORTS > 8
+#endif
+#ifndef HAL_HAVE_SERIAL9
+#define HAL_HAVE_SERIAL9 HAL_NUM_SERIAL_PORTS > 9
+#endif
+
 extern const AP_HAL::HAL& hal;
 
 #ifndef DEFAULT_SERIAL0_PROTOCOL
@@ -178,7 +209,7 @@ const AP_Param::GroupInfo AP_SerialManager::var_info[] = {
     // @Param: 1_PROTOCOL
     // @DisplayName: Telem1 protocol selection
     // @Description: Control what protocol to use on the Telem1 port. Note that the Frsky options require external converter hardware. See the wiki for details.
-    // @Values: -1:None, 1:MAVLink1, 2:MAVLink2, 3:Frsky D, 4:Frsky SPort, 5:GPS, 7:Alexmos Gimbal Serial, 8:Gimbal, 9:Rangefinder, 10:FrSky SPort Passthrough (OpenTX), 11:Lidar360, 13:Beacon, 14:Volz servo out, 15:SBus servo out, 16:ESC Telemetry, 17:Devo Telemetry, 18:OpticalFlow, 19:RobotisServo, 20:NMEA Output, 21:WindVane, 22:SLCAN, 23:RCIN, 24:EFI Serial, 25:LTM, 26:RunCam, 27:HottTelem, 28:Scripting, 29:Crossfire VTX, 30:Generator, 31:Winch, 32:MSP, 33:DJI FPV, 34:AirSpeed, 35:ADSB, 36:AHRS, 37:SmartAudio, 38:FETtecOneWire, 39:Torqeedo, 40:AIS, 41:CoDevESC, 42:DisplayPort, 43:MAVLink High Latency, 44:IRC Tramp
+    // @Values: -1:None, 1:MAVLink1, 2:MAVLink2, 3:Frsky D, 4:Frsky SPort, 5:GPS, 7:Alexmos Gimbal Serial, 8:Gimbal, 9:Rangefinder, 10:FrSky SPort Passthrough (OpenTX), 11:Lidar360, 13:Beacon, 14:Volz servo out, 15:SBus servo out, 16:ESC Telemetry, 17:Devo Telemetry, 18:OpticalFlow, 19:RobotisServo, 20:NMEA Output, 21:WindVane, 22:SLCAN, 23:RCIN, 24:EFI Serial, 25:LTM, 26:RunCam, 27:HottTelem, 28:Scripting, 29:Crossfire VTX, 30:Generator, 31:Winch, 32:MSP, 33:DJI FPV, 34:AirSpeed, 35:ADSB, 36:AHRS, 37:SmartAudio, 38:FETtecOneWire, 39:Torqeedo, 40:AIS, 41:CoDevESC, 42:DisplayPort, 43:MAVLink High Latency, 44:IRC Tramp, 45:DDS XRCE
     // @User: Standard
     // @RebootRequired: True
     AP_GROUPINFO("1_PROTOCOL",  1, AP_SerialManager, state[1].protocol, DEFAULT_SERIAL1_PROTOCOL),
@@ -819,8 +850,24 @@ void AP_SerialManager::set_protocol_and_baud(uint8_t sernum, enum SerialProtocol
  */
 void AP_SerialManager::register_port(RegisteredPort *port)
 {
-    port->next = registered_ports;
-    registered_ports = port;
+    const auto idx = port->state.idx;
+    WITH_SEMAPHORE(port_sem);
+    /*
+      maintain the list in ID order
+     */
+    if (registered_ports == nullptr ||
+        registered_ports->state.idx >= idx) {
+        port->next = registered_ports;
+        registered_ports = port;
+        return;
+    }
+    for (auto p = registered_ports; p; p = p->next) {
+        if (p->next == nullptr || p->next->state.idx >= idx) {
+            port->next = p->next;
+            p->next = port;
+            break;
+        }
+    }
 }
 #endif // AP_SERIALMANAGER_REGISTER_ENABLED
 
