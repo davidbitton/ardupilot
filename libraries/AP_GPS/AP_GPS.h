@@ -131,6 +131,7 @@ public:
         GPS_TYPE_UAVCAN_RTK_ROVER = 23,
         GPS_TYPE_UNICORE_NMEA = 24,
         GPS_TYPE_UNICORE_MOVINGBASE_NMEA = 25,
+        GPS_TYPE_SBF_DUAL_ANTENNA = 26,
 #if HAL_SIM_GPS_ENABLED
         GPS_TYPE_SITL = 100,
 #endif
@@ -211,6 +212,7 @@ public:
         float undulation;                   //<height that WGS84 is above AMSL at the current location
         bool have_undulation;               ///<do we have a value for the undulation
         uint32_t last_gps_time_ms;          ///< the system time we got the last GPS timestamp, milliseconds
+        bool announced_detection;           ///< true once we have announced GPS has been seen to the user
         uint64_t last_corrected_gps_time_us;///< the system time we got the last corrected GPS timestamp, microseconds
         bool corrected_timestamp_updated;  ///< true if the corrected timestamp has been updated
         uint32_t lagged_sample_count;       ///< number of samples with 50ms more lag than expected
@@ -590,7 +592,6 @@ protected:
     AP_Int8 _type[GPS_MAX_RECEIVERS];
     AP_Int8 _navfilter;
     AP_Int8 _auto_switch;
-    AP_Int8 _min_dgps;
     AP_Int16 _sbp_logmask;
     AP_Int8 _inject_to;
     uint32_t _last_instance_swap_ms;
@@ -623,6 +624,7 @@ protected:
         UBX_Use115200     = (1U << 2U),
         UAVCAN_MBUseDedicatedBus  = (1 << 3U),
         HeightEllipsoid   = (1U << 4),
+        GPSL5HealthOverride = (1U << 5)
     };
 
     // check if an option is set
@@ -675,6 +677,7 @@ private:
     struct detect_state {
         uint32_t last_baud_change_ms;
         uint8_t current_baud;
+        uint32_t probe_baud;
         bool auto_detected_baud;
         struct UBLOX_detect_state ublox_detect_state;
         struct SIRF_detect_state sirf_detect_state;

@@ -55,6 +55,12 @@
 #include "AP_DroneCAN_serial.h"
 #endif
 
+#if AP_RELAY_DRONECAN_ENABLED
+#include <AP_Relay/AP_Relay.h>
+#endif
+
+#include <AP_TemperatureSensor/AP_TemperatureSensor_DroneCAN.h>
+
 extern const AP_HAL::HAL& hal;
 
 // setup default pool size
@@ -153,6 +159,16 @@ const AP_Param::GroupInfo AP_DroneCAN::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("ESC_RV", 9, AP_DroneCAN, _esc_rv, 0),
 
+#if AP_RELAY_DRONECAN_ENABLED
+    // @Param: RLY_RT
+    // @DisplayName: DroneCAN relay output rate
+    // @Description: Maximum transmit rate for relay outputs, note that this rate is per message each message does 1 relay, so if with more relays will take longer to update at the same rate, a extra message will be sent when a relay changes state
+    // @Range: 0 200
+    // @Units: Hz
+    // @User: Advanced
+    AP_GROUPINFO("RLY_RT", 23, AP_DroneCAN, _relay.rate_hz, 0),
+#endif
+
 #if AP_DRONECAN_SERIAL_ENABLED
     /*
       due to the parameter tree depth limitation we can't use a sub-table for the serial parameters
@@ -250,6 +266,8 @@ const AP_Param::GroupInfo AP_DroneCAN::var_info[] = {
     AP_GROUPINFO("S3_PRO", 22,  AP_DroneCAN, serial.ports[2].state.protocol, -1),
 #endif
 #endif // AP_DRONECAN_SERIAL_ENABLED
+
+    // RLY_RT is index 23 but has to be above SER_EN so its not hidden
 
     AP_GROUPEND
 };
@@ -374,6 +392,9 @@ void AP_DroneCAN::init(uint8_t driver_index, bool enable_filters)
 #if HAL_MOUNT_XACTI_ENABLED
     AP_Mount_Xacti::subscribe_msgs(this);
 #endif
+#if AP_TEMPERATURE_SENSOR_DRONECAN_ENABLED
+    AP_TemperatureSensor_DroneCAN::subscribe_msgs(this);
+#endif
 
     act_out_array.set_timeout_ms(5);
     act_out_array.set_priority(CANARD_TRANSFER_PRIORITY_HIGH);
@@ -433,6 +454,11 @@ void AP_DroneCAN::init(uint8_t driver_index, bool enable_filters)
     xacti_gnss_status.set_priority(CANARD_TRANSFER_PRIORITY_LOW);
 #endif
 
+#if AP_RELAY_DRONECAN_ENABLED
+    relay_hardpoint.set_timeout_ms(20);
+    relay_hardpoint.set_priority(CANARD_TRANSFER_PRIORITY_LOW);
+#endif
+
     param_save_client.set_timeout_ms(20);
     param_save_client.set_priority(CANARD_TRANSFER_PRIORITY_LOW);
 
@@ -448,9 +474,6 @@ void AP_DroneCAN::init(uint8_t driver_index, bool enable_filters)
     can_stats.set_priority(CANARD_TRANSFER_PRIORITY_LOWEST);
     can_stats.set_timeout_ms(3000);
 
-    rgb_led.set_timeout_ms(20);
-    rgb_led.set_priority(CANARD_TRANSFER_PRIORITY_LOW);
-    
     node_info_server.set_timeout_ms(20);
 
     // setup node status
@@ -530,6 +553,10 @@ void AP_DroneCAN::loop(void)
 
 #if AP_DRONECAN_SERIAL_ENABLED
         serial.update();
+#endif
+
+#if AP_RELAY_DRONECAN_ENABLED
+        relay_hardpoint_send();
 #endif
     }
 }
@@ -1211,6 +1238,33 @@ void AP_DroneCAN::safety_state_send()
     }
 }
 
+// Send relay outputs with hardpoint msg
+#if AP_RELAY_DRONECAN_ENABLED
+void AP_DroneCAN::relay_hardpoint_send()
+{
+    const uint32_t now = AP_HAL::millis();
+    if ((_relay.rate_hz == 0) || ((now - _relay.last_send_ms) < uint32_t(1000 / _relay.rate_hz))) {
+        // Rate limit per user config
+        return;
+    }
+    _relay.last_send_ms = now;
+
+    AP_Relay *relay = AP::relay();
+    if (relay == nullptr) {
+        return;
+    }
+
+    uavcan_equipment_hardpoint_Command msg {};
+
+    // Relay will populate the next command to send and update the last index
+    // This will cycle through each relay in turn
+    if (relay->dronecan.populate_next_command(_relay.last_index, msg)) {
+        relay_hardpoint.broadcast(msg);
+    }
+
+}
+#endif // AP_RELAY_DRONECAN_ENABLED
+
 /*
   handle Button message
  */
@@ -1304,6 +1358,7 @@ void AP_DroneCAN::handle_traffic_report(const CanardRxTransfer& transfer, const 
  */
 void AP_DroneCAN::handle_actuator_status(const CanardRxTransfer& transfer, const uavcan_equipment_actuator_Status& msg)
 {
+#if HAL_LOGGING_ENABLED
     // log as CSRV message
     AP::logger().Write_ServoStatus(AP_HAL::micros64(),
                                    msg.actuator_id,
@@ -1312,6 +1367,7 @@ void AP_DroneCAN::handle_actuator_status(const CanardRxTransfer& transfer, const
                                    msg.speed,
                                    msg.power_rating_pct,
                                    0, 0, 0, 0, 0, 0);
+#endif
 }
 
 #if AP_DRONECAN_HIMARK_SERVO_SUPPORT
@@ -1320,6 +1376,7 @@ void AP_DroneCAN::handle_actuator_status(const CanardRxTransfer& transfer, const
  */
 void AP_DroneCAN::handle_himark_servoinfo(const CanardRxTransfer& transfer, const com_himark_servo_ServoInfo &msg)
 {
+#if HAL_LOGGING_ENABLED
     // log as CSRV message
     AP::logger().Write_ServoStatus(AP_HAL::micros64(),
                                    msg.servo_id,
@@ -1333,12 +1390,14 @@ void AP_DroneCAN::handle_himark_servoinfo(const CanardRxTransfer& transfer, cons
                                    msg.motor_temp*0.2-40,
                                    msg.pcb_temp*0.2-40,
                                    msg.error_status);
+#endif
 }
 #endif // AP_DRONECAN_HIMARK_SERVO_SUPPORT
 
 #if AP_DRONECAN_VOLZ_FEEDBACK_ENABLED
 void AP_DroneCAN::handle_actuator_status_Volz(const CanardRxTransfer& transfer, const com_volz_servo_ActuatorStatus& msg)
 {
+#if HAL_LOGGING_ENABLED
     AP::logger().WriteStreaming(
         "CVOL",
         "TimeUS,Id,Pos,Cur,V,Pow,T",
@@ -1352,6 +1411,7 @@ void AP_DroneCAN::handle_actuator_status_Volz(const CanardRxTransfer& transfer, 
         msg.voltage * 0.2f,
         msg.motor_pwm * (100.0/255.0),
         int16_t(msg.motor_temperature) - 50);
+#endif
 }
 #endif
 
@@ -1395,14 +1455,44 @@ bool AP_DroneCAN::is_esc_data_index_valid(const uint8_t index) {
  */
 void AP_DroneCAN::handle_debug(const CanardRxTransfer& transfer, const uavcan_protocol_debug_LogMessage& msg)
 {
-#if HAL_LOGGING_ENABLED
-    if (AP::can().get_log_level() != AP_CANManager::LOG_NONE) {
+#if AP_HAVE_GCS_SEND_TEXT
+    const auto log_level = AP::can().get_log_level();
+    const auto msg_level = msg.level.value;
+    bool send_mavlink = false;
+
+    if (log_level != AP_CANManager::LOG_NONE) {
         // log to onboard log and mavlink
-        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "CAN[%u] %s", transfer.source_node_id, msg.text.data);
-    } else {
-        // only log to onboard log
-        AP::logger().Write_MessageF("CAN[%u] %s", transfer.source_node_id, msg.text.data);
+        enum MAV_SEVERITY mavlink_level = MAV_SEVERITY_INFO;
+        switch (msg_level) {
+        case UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_DEBUG:
+            mavlink_level = MAV_SEVERITY_DEBUG;
+            send_mavlink = uint8_t(log_level) >= uint8_t(AP_CANManager::LogLevel::LOG_DEBUG);
+            break;
+        case UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_INFO:
+            mavlink_level = MAV_SEVERITY_INFO;
+            send_mavlink = uint8_t(log_level) >= uint8_t(AP_CANManager::LogLevel::LOG_INFO);
+            break;
+        case UAVCAN_PROTOCOL_DEBUG_LOGLEVEL_WARNING:
+            mavlink_level = MAV_SEVERITY_WARNING;
+            send_mavlink = uint8_t(log_level) >= uint8_t(AP_CANManager::LogLevel::LOG_WARNING);
+            break;
+        default:
+            send_mavlink = uint8_t(log_level) >= uint8_t(AP_CANManager::LogLevel::LOG_ERROR);
+            mavlink_level = MAV_SEVERITY_ERROR;
+            break;
+        }
+        if (send_mavlink) {
+            // when we send as MAVLink it also gets logged locally, so
+            // we return to avoid a duplicate
+            GCS_SEND_TEXT(mavlink_level, "CAN[%u] %s", transfer.source_node_id, msg.text.data);
+            return;
+        }
     }
+#endif // AP_HAVE_GCS_SEND_TEXT
+
+#if HAL_LOGGING_ENABLED
+    // always log locally if we have logging enabled
+    AP::logger().Write_MessageF("CAN[%u] %s", transfer.source_node_id, msg.text.data);
 #endif
 }
 
@@ -1748,6 +1838,22 @@ void AP_DroneCAN::logging(void)
                                 _srv_send_count,
                                 _fail_send_count);
 #endif // HAL_LOGGING_ENABLED
+}
+
+// add an 11 bit auxillary driver
+bool AP_DroneCAN::add_11bit_driver(CANSensor *sensor)
+{
+    return canard_iface.add_11bit_driver(sensor);
+}
+
+// handler for outgoing frames for auxillary drivers
+bool AP_DroneCAN::write_aux_frame(AP_HAL::CANFrame &out_frame, const uint64_t timeout_us)
+{
+    if (out_frame.isExtended()) {
+        // don't allow extended frames to be sent by auxillary driver
+        return false;
+    }
+    return canard_iface.write_aux_frame(out_frame, timeout_us);
 }
 
 #endif // HAL_NUM_CAN_IFACES
