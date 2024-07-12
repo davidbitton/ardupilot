@@ -90,6 +90,9 @@ public:
 #if AP_RCPROTOCOL_FDM_ENABLED
         FDM = 18,
 #endif
+#if AP_RCPROTOCOL_EXBUS_ENABLED
+        EXBUS = 19,
+#endif
         NONE    //last enum always is None
     };
 
@@ -154,6 +157,9 @@ public:
 #endif
 #if AP_RCPROTOCOL_GHST_ENABLED
         case GHST:
+#endif
+#if AP_RCPROTOCOL_EXBUS_ENABLED
+        case EXBUS:
 #endif
             return true;
 #if AP_RCPROTOCOL_IBUS_ENABLED

@@ -24,7 +24,11 @@
 #endif
 
 #ifdef USE_TERMIOS
+#ifdef __APPLE__
+#include <IOKit/serial/ioss.h>
+#else
 #include <termios.h>
+#endif
 #else
 #include <asm/ioctls.h>
 #include <asm/termbits.h>
@@ -43,7 +47,28 @@ bool HALSITL::UARTDriver::set_speed(int speed) const
 #ifdef USE_TERMIOS
     struct termios t;
     tcgetattr(_fd, &t);
+ // this allows us to use non-stanard baud rates (i.e. not defined in termios.h)
+ #ifdef __APPLE__   
+    if (ioctl(_fd, IOSSIOSPEED, (size_t)&speed) == -1) {
+        ::printf("[WARN] ioctl(..., IOSSIOSPEED, %d).\n", speed);
+        return false;
+    }
+    
+    // Check that speed is properly modified
+    if (tcgetattr(_fd, &t) == -1) {
+        ::printf("[WARN] _modifyAttributes: tcgetattr failed\n");
+        return false;
+    }
+    
+    size_t ispeed = cfgetispeed(&t); 
+    size_t ospeed = cfgetospeed(&t);
+    if (ispeed != ospeed) {
+        ::printf("[WARN] _modifyAttributes: cfsetspeed failed, %zu, %lu.\n", (size_t)speed, cfgetispeed(&t));
+        return false;
+    }
+#else
     cfsetspeed(&t, speed);
+#endif
     tcsetattr(_fd, TCSANOW, &t);
 #else
     struct termios2 tc;

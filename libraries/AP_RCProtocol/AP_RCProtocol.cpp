@@ -38,6 +38,7 @@
 #include "AP_RCProtocol_Joystick_SFML.h"
 #include "AP_RCProtocol_UDP.h"
 #include "AP_RCProtocol_FDM.h"
+#include "AP_RCProtocol_EXBUS.h"
 #include <AP_Math/AP_Math.h>
 #include <RC_Channel/RC_Channel.h>
 
@@ -110,6 +111,9 @@ void AP_RCProtocol::init()
     UDP_backend->set_fdm_backend(FDM_backend);
 #endif  // AP_RCPROTOCOL_UDP_ENABLED
 #endif  // AP_RCPROTOCOL_FDM_ENABLED
+#if AP_RCPROTOCOL_EXBUS_ENABLED
+    backend[AP_RCProtocol::EXBUS] = new AP_RCProtocol_EXBUS(*this);
+#endif
 
 }
 
@@ -338,6 +342,12 @@ static const AP_RCProtocol::SerialConfig serial_configs[] {
     { 416666,  0,   1, false },
     // CRSFv3 can negotiate higher rates which are sticky on soft reboot
     { 2000000, 0,   1, false },
+#endif
+#if AP_RCPROTOCOL_EXBUS_ENABLED
+    // LS:
+    { 125000,  0,   1, false },
+    // HS:
+    { 250000, 0,   1, false },
 #endif
 };
 
@@ -620,6 +630,10 @@ const char *AP_RCProtocol::protocol_name_from_protocol(rcprotocol_t protocol)
 #if AP_RCPROTOCOL_FDM_ENABLED
     case FDM:
         return "FDM";
+#endif
+#if AP_RCPROTOCOL_EXBUS_ENABLED
+    case EXBUS:
+        return "EXBUS";
 #endif
     case NONE:
         break;

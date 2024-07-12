@@ -1,0 +1,4 @@
+Unable to find Mach task port for process-id 26974: (os/kern) failure (0x5).
+ (please check gdb is codesigned - see taskgated(8))
+/tmp/gdb.27006:2: Error in sourced command file:
+You can't do that without a process to debug.

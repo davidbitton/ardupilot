@@ -77,7 +77,7 @@ SocketAPM_native rc_socket{true};
 
 // change this to the device being tested.
 const char *devicename = "/dev/serial/by-id/usb-FTDI_FT232R_USB_UART_A10596TP-if00-port0";
-const uint32_t baudrate = 115200;
+const uint32_t baudrate = 125000;
 
 static int fd;
 static uint16_t chan[16];
@@ -136,7 +136,7 @@ void loop()
     ssize_t ret = read(fd, buf, sizeof(buf));
 
     for (uint8_t i=0; i<ret; i++) {
-        rcprot->process_byte(buf[i], 115200);
+        rcprot->process_byte(buf[i], baudrate);
         if (rcprot->new_input()) {
             nchan = MIN(rcprot->num_channels(), 16);
             rcprot->read(chan, nchan);
@@ -169,7 +169,7 @@ AP_HAL::HAL::FunCallbacks callbacks(setup, loop);
 extern "C" {
 int main(int argc, char* const argv[]);
 int main(int argc, char* const argv[]) {
-#if CONFIG_HAL_BOARD == HAL_BOARD_LINUX
+#if CONFIG_HAL_BOARD == HAL_BOARD_LINUX || defined(__APPLE__)
     if (argc > 1) {
         devicename = argv[1];
     }
