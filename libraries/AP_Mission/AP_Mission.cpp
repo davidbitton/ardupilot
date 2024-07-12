@@ -2317,8 +2317,14 @@ void AP_Mission::check_eeprom_version()
 // find the nearest landing sequence starting point (DO_LAND_START) and
 // return its index.  Returns 0 if no appropriate DO_LAND_START point can
 // be found.
-uint16_t AP_Mission::get_landing_sequence_start(const Location &current_loc)
+uint16_t AP_Mission::get_landing_sequence_start()
 {
+    Location current_loc;
+
+    if (!AP::ahrs().get_location(current_loc)) {
+        return 0;
+    }
+
     const Location::AltFrame current_loc_alt_frame = current_loc.get_alt_frame();
     uint16_t landing_start_index = 0;
     float min_distance = -1;
@@ -2363,9 +2369,9 @@ uint16_t AP_Mission::get_landing_sequence_start(const Location &current_loc)
    switch to that mission item.  Returns false if no DO_LAND_START
    available.
  */
-bool AP_Mission::jump_to_landing_sequence(const Location &current_loc)
+bool AP_Mission::jump_to_landing_sequence(void)
 {
-    uint16_t land_idx = get_landing_sequence_start(current_loc);
+    uint16_t land_idx = get_landing_sequence_start();
     if (land_idx != 0 && set_current_cmd(land_idx)) {
 
         //if the mission has ended it has to be restarted
@@ -2383,25 +2389,29 @@ bool AP_Mission::jump_to_landing_sequence(const Location &current_loc)
 }
 
 // jumps the mission to the closest landing abort that is planned, returns false if unable to find a valid abort
-bool AP_Mission::jump_to_abort_landing_sequence(const Location &current_loc)
+bool AP_Mission::jump_to_abort_landing_sequence(void)
 {
-    uint16_t abort_index = 0;
-    float min_distance = FLT_MAX;
+    Location current_loc;
 
-    const auto count = num_commands();
-    for (uint16_t i = 1; i < count; i++) {
-        if (get_command_id(i) != uint16_t(MAV_CMD_DO_GO_AROUND)) {
-            continue;
-        }
-        Mission_Command tmp;
-        if (!read_cmd_from_storage(i, tmp)) {
-            continue;
-        }
-        if (tmp.id == MAV_CMD_DO_GO_AROUND) {
-            float tmp_distance = tmp.content.location.get_distance(current_loc);
-            if (tmp_distance < min_distance) {
-                min_distance = tmp_distance;
-                abort_index = i;
+    uint16_t abort_index = 0;
+    if (AP::ahrs().get_location(current_loc)) {
+        float min_distance = FLT_MAX;
+
+        const auto count = num_commands();
+        for (uint16_t i = 1; i < count; i++) {
+            if (get_command_id(i) != uint16_t(MAV_CMD_DO_GO_AROUND)) {
+                continue;
+            }
+            Mission_Command tmp;
+            if (!read_cmd_from_storage(i, tmp)) {
+                continue;
+            }
+            if (tmp.id == MAV_CMD_DO_GO_AROUND) {
+                float tmp_distance = tmp.content.location.get_distance(current_loc);
+                if (tmp_distance < min_distance) {
+                    min_distance = tmp_distance;
+                    abort_index = i;
+                }
             }
         }
     }
@@ -2424,7 +2434,7 @@ bool AP_Mission::jump_to_abort_landing_sequence(const Location &current_loc)
 }
 
 // check which is the shortest route to landing an RTL via a DO_LAND_START or continuing on the current mission plan
-bool AP_Mission::is_best_land_sequence(const Location &current_loc)
+bool AP_Mission::is_best_land_sequence(void)
 {
     // check if there is even a running mission to interupt
     if (_flags.state != MISSION_RUNNING) {
@@ -2447,9 +2457,16 @@ bool AP_Mission::is_best_land_sequence(const Location &current_loc)
 
     // go through the mission for the nearest DO_LAND_START first as this is the most probable route
     // to a landing with the minimum number of WP.
-    uint16_t do_land_start_index = get_landing_sequence_start(current_loc);
+    uint16_t do_land_start_index = get_landing_sequence_start();
     if (do_land_start_index == 0) {
         // then no DO_LAND_START commands are in mission and normal failsafe behaviour should be maintained
+        return false;
+    }
+
+    // get our current location
+    Location current_loc;
+    if (!AP::ahrs().get_location(current_loc)) {
+        // we don't know where we are!!
         return false;
     }
 
@@ -2909,30 +2926,6 @@ void AP_Mission::format_conversion(uint8_t tag_byte, const Mission_Command &cmd,
     }
 #endif
 }
-
-// Helpers to fill in location for scripting
-#if AP_SCRIPTING_ENABLED
-bool AP_Mission::jump_to_landing_sequence(void)
-{
-    Location loc;
-    if (AP::ahrs().get_location(loc)) {
-        return jump_to_landing_sequence(loc);
-    }
-    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Unable to start landing sequence");
-    return false;
-}
-
-bool AP_Mission::jump_to_abort_landing_sequence(void)
-{
-    Location loc;
-    if (AP::ahrs().get_location(loc)) {
-        return jump_to_abort_landing_sequence(loc);
-    }
-    GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "Unable to start find a landing abort sequence");
-    return false;
-}
-#endif // AP_SCRIPTING_ENABLED
-
 
 // singleton instance
 AP_Mission *AP_Mission::_singleton;

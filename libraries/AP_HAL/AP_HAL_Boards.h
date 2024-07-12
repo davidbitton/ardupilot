@@ -302,7 +302,11 @@
 #endif
 
 #ifndef HAL_SERIAL_ESC_COMM_ENABLED
+#ifdef DISABLE_SERIAL_ESC_COMM
+#define HAL_SERIAL_ESC_COMM_ENABLED 0
+#else
 #define HAL_SERIAL_ESC_COMM_ENABLED 1
+#endif
 #endif
 
 #ifndef AP_BOOTLOADER_FLASHING_ENABLED
@@ -363,13 +367,3 @@
 #ifndef HAL_ENABLE_SENDING_STATS
 #define HAL_ENABLE_SENDING_STATS BOARD_FLASH_SIZE >= 256
 #endif
-
-#ifndef HAL_GPIO_LED_ON
-#define HAL_GPIO_LED_ON 0
-#endif
-
-#ifdef HAL_GPIO_LED_OFF
-#error "HAL_GPIO_LED_OFF must not be defined, it is implicitly !HAL_GPIO_LED_ON"
-#endif
-
-#define HAL_GPIO_LED_OFF (!HAL_GPIO_LED_ON)

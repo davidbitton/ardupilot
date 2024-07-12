@@ -169,7 +169,7 @@ void SPIDevice::acquire_bus(bool accuire)
 AP_HAL::Semaphore *SPIDevice::get_semaphore()
 {
 #ifdef SPIDEBUG
-    printf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
+    rintf("%s:%d \n", __PRETTY_FUNCTION__, __LINE__);
 #endif
     return &bus.semaphore;
 }

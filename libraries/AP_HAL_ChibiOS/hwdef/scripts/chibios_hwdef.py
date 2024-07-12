@@ -1207,7 +1207,25 @@ class ChibiOSHWDef(object):
 
         # setup for bootloader build
         if self.is_bootloader_fw():
-            f.write('''
+            if self.get_config('FULL_CHIBIOS_BOOTLOADER', required=False, default=False):
+                # we got enough space to fit everything so we enable almost everything
+                f.write('''
+#define HAL_BOOTLOADER_BUILD TRUE
+#define HAL_USE_ADC FALSE
+#define HAL_USE_EXT FALSE
+#define HAL_USE_I2C FALSE
+#define HAL_USE_PWM FALSE
+#define HAL_NO_UARTDRIVER
+#ifndef CH_CFG_USE_DYNAMIC
+#define CH_CFG_USE_DYNAMIC FALSE
+#endif
+#define HAL_USE_EMPTY_STORAGE 1
+#ifndef HAL_STORAGE_SIZE
+#define HAL_STORAGE_SIZE 16384
+#endif
+''')
+            else:
+                f.write('''
 #define HAL_BOOTLOADER_BUILD TRUE
 #define HAL_USE_ADC FALSE
 #define HAL_USE_EXT FALSE
@@ -1220,9 +1238,7 @@ class ChibiOSHWDef(object):
 // avoid timer and RCIN threads to save memory
 #define HAL_NO_TIMER_THREAD
 #define HAL_NO_RCOUT_THREAD
-#ifndef HAL_RCIN_THREAD_ENABLED
-#define HAL_RCIN_THREAD_ENABLED 0
-#endif
+#define HAL_NO_RCIN_THREAD
 #ifndef AP_HAL_SHARED_DMA_ENABLED
 #define AP_HAL_SHARED_DMA_ENABLED 0
 #endif

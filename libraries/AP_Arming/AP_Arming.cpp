@@ -365,9 +365,8 @@ bool AP_Arming::ins_accels_consistent(const AP_InertialSensor &ins)
         last_accel_pass_ms = now;
     }
 
-    // if accels can in theory be inconsistent,
     // must pass for at least 10 seconds before we're considered consistent:
-    if (ins.get_accel_count() > 1 && now - last_accel_pass_ms < 10000) {
+    if (now - last_accel_pass_ms < 10000) {
         return false;
     }
 
@@ -390,9 +389,8 @@ bool AP_Arming::ins_gyros_consistent(const AP_InertialSensor &ins)
         last_gyro_pass_ms = now;
     }
 
-    // if gyros can in theory be inconsistent,
     // must pass for at least 10 seconds before we're considered consistent:
-    if (ins.get_gyro_count() > 1 && now - last_gyro_pass_ms < 10000) {
+    if (now - last_gyro_pass_ms < 10000) {
         return false;
     }
 

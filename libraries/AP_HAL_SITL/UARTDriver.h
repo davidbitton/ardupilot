@@ -67,11 +67,6 @@ public:
 
     uint32_t get_baud_rate() const override { return _uart_baudrate; }
 
-#if HAL_UART_STATS_ENABLED
-    // request information on uart I/O
-    void uart_info(ExpandingString &str, StatsTracker &stats, const uint32_t dt_ms) override;
-#endif
-
 private:
 
     int _fd;
@@ -148,10 +143,6 @@ protected:
 private:
     void handle_writing_from_writebuffer_to_device();
     void handle_reading_from_device_to_readbuffer();
-
-    // statistics
-    uint32_t _tx_stats_bytes;
-    uint32_t _rx_stats_bytes;
 };
 
 #endif
