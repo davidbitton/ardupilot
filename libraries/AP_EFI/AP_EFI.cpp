@@ -273,7 +273,7 @@ void AP_EFI::log_status(void)
                                 KELVIN_TO_C(state.cylinder_status.exhaust_gas_temperature2),
                                 state.ecu_index);
 }
-#endif // HAL_LOGGING_ENABLED
+#endif // LOGGING_ENABLED
 
 /*
   send EFI_STATUS

@@ -182,4 +182,4 @@ void RCInput_RCProtocol::_timer_tick(void)
     }
 }
 
-#endif // CONFIG_HAL_BOARD_SUBTYPE
+#endif // HAL

@@ -12,7 +12,16 @@ void Plane::init_ardupilot()
 
     ins.set_log_raw_bit(MASK_LOG_IMU_RAW);
 
+    rollController.convert_pid();
+    pitchController.convert_pid();
+
     // initialise rc channels including setting mode
+    // CONVERSION: Added for upgrade to ArduPlane 4.2, Sep 2021
+#if HAL_QUADPLANE_ENABLED
+    rc().convert_options(RC_Channel::AUX_FUNC::ARMDISARM_UNUSED, (quadplane.enabled() && quadplane.option_is_set(QuadPlane::Option::AIRMODE_UNUSED) && (rc().find_channel_for_option(RC_Channel::AUX_FUNC::AIRMODE) == nullptr)) ? RC_Channel::AUX_FUNC::ARMDISARM_AIRMODE : RC_Channel::AUX_FUNC::ARMDISARM);
+#else
+    rc().convert_options(RC_Channel::AUX_FUNC::ARMDISARM_UNUSED, RC_Channel::AUX_FUNC::ARMDISARM);
+#endif
     rc().init();
 
 #if AP_RELAY_ENABLED
@@ -95,10 +104,7 @@ void Plane::init_ardupilot()
 
     AP_Param::reload_defaults_file(true);
 
-    // ALT_OFFSET always starts at zero, independently of FLIGHT_OPTIONS.
-    reset_alt_offset(true);
-
-    IGNORE_RETURN(set_mode(mode_initializing, ModeReason::INITIALISED));
+    set_mode(mode_initializing, ModeReason::INITIALISED);
 
 #if (GROUND_START_DELAY > 0)
     gcs().send_text(MAV_SEVERITY_NOTICE,"Ground start with delay");
@@ -129,10 +135,6 @@ void Plane::init_ardupilot()
         );
 #endif
 
-#if AP_PLANE_CUSTOMCONTROL_ENABLED
-    custom_control.init();
-#endif
-
     // reset last heartbeat time, so we don't trigger failsafe on slow
     // startup
     gcs().sysid_mygcs_seen(AP_HAL::millis());
@@ -146,7 +148,7 @@ void Plane::init_ardupilot()
     }
     hal.rcout->set_dshot_esc_type(SRV_Channels::get_dshot_esc_type());
 
-    IGNORE_RETURN(set_mode_by_number((enum Mode::Number)g.initial_mode.get(), ModeReason::INITIALISED));
+    set_mode_by_number((enum Mode::Number)g.initial_mode.get(), ModeReason::INITIALISED);
 
     // set the correct flight mode
     // ---------------------------
@@ -313,10 +315,6 @@ bool Plane::set_mode(Mode &new_mode, const ModeReason reason)
     const ModeReason  old_previous_mode_reason = previous_mode_reason;
     previous_mode_reason = control_mode_reason;
     control_mode_reason = reason;
-
-    // Apply the reset before mode entry so altitude targets use the new value,
-    // including when mode entry subsequently fails.
-    reset_alt_offset();
 
     // attempt to enter new mode
     if (!new_mode.enter()) {

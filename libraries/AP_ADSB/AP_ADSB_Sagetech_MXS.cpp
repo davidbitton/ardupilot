@@ -615,17 +615,22 @@ void AP_ADSB_Sagetech_MXS::send_gps_msg()
     // Get Vehicle Longitude and Latitude and Convert to string
     const int32_t longitude = _frontend._my_loc.lng;
     const int32_t latitude =  _frontend._my_loc.lat;
-    format_longitude(gps.longitude, sizeof(gps.longitude), longitude);
-    format_latitude(gps.latitude, sizeof(gps.latitude), latitude);
+    const double lon_deg = longitude * (double)1.0e-7 * (longitude < 0 ? -1 : 1);
+    const double lon_minutes = (lon_deg - int(lon_deg)) * 60;
+    snprintf((char*)&gps.longitude, 12, "%03u%02u.%05u", (unsigned)lon_deg, (unsigned)lon_minutes, unsigned((lon_minutes - (int)lon_minutes) * 1.0E5));
+
+    const double lat_deg = latitude * (double)1.0e-7 * (latitude < 0 ? -1 : 1);
+    const double lat_minutes = (lat_deg - int(lat_deg)) * 60;
+    snprintf((char*)&gps.latitude, 11, "%02u%02u.%05u", (unsigned)lat_deg, (unsigned)lat_minutes, unsigned((lat_minutes - (int)lat_minutes) * 1.0E5));
 
     const Vector2f speed = _frontend._my_loc.groundspeed_vector();
     const float speed_knots = speed.length() * M_PER_SEC_TO_KNOTS;
-    format_speed_knots(gps.grdSpeed, sizeof(gps.grdSpeed), speed_knots);
+    snprintf((char*)&gps.grdSpeed, 7, "%03u.%02u", (unsigned)speed_knots, unsigned((speed_knots - (int)speed_knots) * 1.0E2));
 
     if (!is_zero(speed_knots)) {
         cog = wrap_360(degrees(speed.angle()));
     }
-    format_track_deg(gps.grdTrack, sizeof(gps.grdTrack), cog);
+    snprintf((char*)&gps.grdTrack, 9, "%03u.%04u", unsigned(cog), unsigned((cog - (int)cog) * 1.0E4));
 
 
     gps.latNorth = (latitude >= 0 ? true: false);
@@ -633,8 +638,13 @@ void AP_ADSB_Sagetech_MXS::send_gps_msg()
 
     gps.gpsValid = ap_gps.status() >=  AP_GPS_FixType::FIX_2D;
 
+    uint64_t time_usec = ap_gps.epoch_from_rtc_us;
     if (ap_gps.have_epoch_from_rtc_us) {
-        format_time_of_day(gps.timeOfFix, sizeof(gps.timeOfFix), ap_gps.epoch_from_rtc_us);
+        const time_t time_sec = time_usec * 1E-6;
+        struct tm tmd {};
+        struct tm* tm = gmtime_r(&time_sec, &tmd);
+
+        snprintf((char*)&gps.timeOfFix, 11, "%02u%02u%06.3f", tm->tm_hour, tm->tm_min, tm->tm_sec + (time_usec % 1000000) * 1.0e-6);
     } else {
         strncpy(gps.timeOfFix, "      .   ", 11);
     }

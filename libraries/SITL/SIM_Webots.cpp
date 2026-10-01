@@ -440,10 +440,8 @@ void Webots::output (const struct sitl_input &input)
   update the Webots simulation by one time step
  */
 void Webots::update(const struct sitl_input &input)
-{
+{   
     static bool first = true;
-    update_battery();
-
     if (!connect_sockets()) {
         return;
     }

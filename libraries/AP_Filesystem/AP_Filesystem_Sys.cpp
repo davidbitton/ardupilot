@@ -27,10 +27,6 @@
 #include <AP_Scheduler/AP_Scheduler.h>
 #include <AP_Common/ExpandingString.h>
 
-#ifndef AP_CRASHDUMP_FLASH_ENABLED
-#define AP_CRASHDUMP_FLASH_ENABLED 0
-#endif
-
 extern const AP_HAL::HAL& hal;
 
 struct SysFileList {
@@ -51,9 +47,7 @@ static const SysFileList sysfs_file_list[] = {
 #if !defined(HAL_BOOTLOADER_BUILD) && (defined(STM32F7) || defined(STM32H7))
     {"persistent.parm"},
 #endif
-#if AP_CRASHDUMP_FLASH_ENABLED
     {"crash_dump.bin"},
-#endif
     {"storage.bin"},
 #if AP_FILESYSTEM_SYS_FLASH_ENABLED
     {"flash.bin"},
@@ -139,12 +133,9 @@ int AP_Filesystem_Sys::open(const char *fname, int flags, bool allow_absolute_pa
     if (strcmp(fname, "persistent.parm") == 0) {
         hal.util->load_persistent_params(*r.str);
     }
-#if AP_CRASHDUMP_FLASH_ENABLED
+#if AP_CRASHDUMP_ENABLED
     if (strcmp(fname, "crash_dump.bin") == 0) {
-        void *ptr = hal.util->last_crash_dump_ptr();
-        if (ptr != nullptr) {
-            r.str->set_buffer((char*)ptr, hal.util->last_crash_dump_size(), hal.util->last_crash_dump_size());
-        }
+        r.str->set_buffer((char*)hal.util->last_crash_dump_ptr(), hal.util->last_crash_dump_size(), hal.util->last_crash_dump_size());
     }
 #endif
     if (strcmp(fname, "storage.bin") == 0) {
@@ -304,7 +295,7 @@ int AP_Filesystem_Sys::stat(const char *pathname, struct stat *stbuf)
     // read every file for a directory listing
     if (strcmp(pathname_noslash, "storage.bin") == 0) {
         stbuf->st_size = HAL_STORAGE_SIZE;
-#if AP_CRASHDUMP_FLASH_ENABLED
+#if AP_CRASHDUMP_ENABLED
     } else if (strcmp(pathname_noslash, "crash_dump.bin") == 0) {
         stbuf->st_size = hal.util->last_crash_dump_size();
 #endif

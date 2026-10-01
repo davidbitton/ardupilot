@@ -20,21 +20,6 @@
 
 #include "AP_InertialSensor_ADIS16607.h"
 
-#if defined(ADIS16607_SYNC_INPUT_CLOCK_HZ)
-#if (ADIS16607_SYNC_INPUT_CLOCK_HZ < 1000) || (ADIS16607_SYNC_INPUT_CLOCK_HZ > 8000)
-#error "Invalid ADIS16607 sync input clock range!"
-#endif
-
-#ifndef ADIS16607_SYNC_INPUT_BITMASK
-#error "Use ADIS16607_SYNC_INPUT_BITMASK macro to define sync clock IMU instances."
-#endif
-
-#else
-#if defined(ADIS16607_SYNC_INPUT_BITMASK)
-#error "Use ADIS16607_SYNC_INPUT_CLOCK_HZ macro to define sync clock frequency."
-#endif  // defined(ADIS16607_SYNC_INPUT_BITMASK)
-#endif  // defined(ADIS16607_SYNC_INPUT_CLOCK_HZ)
-
 /*
   device registers
  */
@@ -122,103 +107,9 @@ AP_InertialSensor_ADIS16607::probe(AP_InertialSensor &imu,
 
 void AP_InertialSensor_ADIS16607::start()
 {
-    // pre-fetch instance numbers for checking fast sampling settings
-    if (!_imu.get_gyro_instance(gyro_instance) || !_imu.get_accel_instance(accel_instance)) {
-        return;
-    }
-
-    backend_rate_hz = 1000;
-    if (enable_fast_sampling(accel_instance) && (get_fast_sampling_rate() > 1) && (dev->bus_type() == AP_HAL::Device::BUS_TYPE_SPI)) {
-        // constrain the gyro rate to be at least the loop rate
-        uint8_t loop_limit = 1;
-        if (get_loop_rate_hz() > 1000) {
-            loop_limit = 2;
-        }
-        if (get_loop_rate_hz() > 2000) {
-            loop_limit = 4;
-        }
-        // constrain the gyro rate to be a 2^N multiple
-        uint8_t fast_sampling_rate = constrain_int16(get_fast_sampling_rate(), loop_limit, 8);
-        backend_rate_hz *= fast_sampling_rate;
-    }
-
-    uint16_t gpio_cfg1 = 0x0000;
-#if defined (ADIS16607_SYNC_INPUT_CLOCK_HZ) && defined (ADIS16607_SYNC_INPUT_BITMASK)
-    if (ADIS16607_SYNC_INPUT_BITMASK & (1U << accel_instance)) {
-        calc_sample_and_dec_rate();
-
-        // Configure GPIO2 as SYNC
-        gpio_cfg1 = 0x0040;
-    } else
-#endif
-    {
-        switch (backend_rate_hz) {
-        case 2000:
-            expected_sample_rate_hz = 2390;
-            dec_rate = DEC_RATE_2390HZ;
-            break;
-        case 4000:
-            expected_sample_rate_hz = 4780;
-            dec_rate = DEC_RATE_4780HZ;
-            break;
-        case 8000:
-            expected_sample_rate_hz = 9560;
-            dec_rate = DEC_RATE_9560HZ;
-            break;
-        default:
-            expected_sample_rate_hz = 1195;
-            dec_rate = DEC_RATE_1195HZ;
-            break;
-        }
-    }
-
     if (!_imu.register_accel(accel_instance, expected_sample_rate_hz, dev->get_bus_id_devtype(DEVTYPE_INS_ADIS16607)) ||
         !_imu.register_gyro(gyro_instance, expected_sample_rate_hz, dev->get_bus_id_devtype(DEVTYPE_INS_ADIS16607))) {
         return;
-    }
-
-    {
-        WITH_SEMAPHORE(dev->get_semaphore());
-
-        // Enable SPI Writes to Register Map
-        write_reg16(REG_WRITE_LOCK, 0xAAAA, false);
-        write_reg16(REG_WRITE_LOCK, 0x5555, false);
-
-        // Configure GPIO pins
-        const bool gpio_cfg_ok = write_reg16(REG_USER_GPIO_CFG1, gpio_cfg1, true);
-
-        /**
-         * Bring rate down
-         * The actual decimation rate, D, is the DEC_RATE+1. Note that when changing the decimation rate, it is
-         * recommended to first reset DEC_RATE to 0x000 before entering the new value. This
-         * allows the decimation accumulator to reset.
-         */
-        const bool rate_ok = write_reg16(REG_DEC_RATE, 0, true) && write_reg16(REG_DEC_RATE, dec_rate, true);
-
-        // discard samples taken at the old rate
-        write_reg16(REG_USER_FIFO_CFG, USER_FIFO_CFG_CLEAR_FIFO_B | (ADIS16607_FIFO_THRESHOLD << 0), false);
-
-        // Write lock
-        write_reg16(REG_WRITE_LOCK, 0x5555, false);
-        write_reg16(REG_WRITE_LOCK, 0xAAAA, false);
-
-        if (!rate_ok || !gpio_cfg_ok) {
-            DEV_PRINTF("ADIS16607: Rate/GPIO config error\n");
-            return;
-        }
-
-        if (read_reg16(REG_WRITE_LOCK) != 1U) {
-            DEV_PRINTF("ADIS16607: Register lock failed\n");
-            return;
-        }
-
-        // Read DIAG_STAT twice to ensure clearing possible false errors.
-        if (read_reg16(REG_DIAG_STAT) != 0x0000) {
-            if (read_reg16(REG_DIAG_STAT) != 0x0000) {
-                DEV_PRINTF("ADIS16607: Diag status error\n");
-                return;
-            }
-        }
     }
 
     // setup sensor rotations from probe()
@@ -235,34 +126,6 @@ void AP_InertialSensor_ADIS16607::start()
                                                       FUNCTOR_BIND_MEMBER(&AP_InertialSensor_ADIS16607::read_sensor_fifo, void));
 }
 
-#if defined (ADIS16607_SYNC_INPUT_CLOCK_HZ) && defined (ADIS16607_SYNC_INPUT_BITMASK)
-/**
- * @brief Calculate the DEC_RATE and expected_sample_rate_hz parameters
- *        when using an external synchronization clock.
- */
-void AP_InertialSensor_ADIS16607::calc_sample_and_dec_rate()
-{
-    const uint16_t sync_clk = ADIS16607_SYNC_INPUT_CLOCK_HZ;
-
-    if (backend_rate_hz >= sync_clk) {
-        dec_rate = 0;
-        expected_sample_rate_hz = sync_clk;
-    } else {
-        int16_t min_error = INT16_MAX;
-        for (uint8_t i = 0; i < 9; i++) {
-            uint16_t error_abs = abs((sync_clk / (i + 1)) - backend_rate_hz);
-            if (error_abs < min_error) {
-                min_error = error_abs;
-                dec_rate = i;
-                expected_sample_rate_hz = (uint16_t)(sync_clk / (i + 1));
-            } else {
-                break;
-            }
-        }
-    }
-}
-#endif
-
 /**
  * @brief Check dev ID
  */
@@ -271,10 +134,44 @@ bool AP_InertialSensor_ADIS16607::check_dev_id()
     // Lock the SPI mode
     write_reg16(REG_SPI_HALFDUPLEX_KEY, 0xB4B4, false);
 
+    backend_rate_hz = 1000;
+    if (enable_fast_sampling(accel_instance) && (get_fast_sampling_rate() > 1) && (dev->bus_type() == AP_HAL::Device::BUS_TYPE_SPI)) {
+        // constrain the gyro rate to be at least the loop rate
+        uint8_t loop_limit = 1;
+        if (get_loop_rate_hz() > 1000) {
+            loop_limit = 2;
+        }
+        if (get_loop_rate_hz() > 2000) {
+            loop_limit = 4;
+        }
+        // constrain the gyro rate to be a 2^N multiple
+        uint8_t fast_sampling_rate = constrain_int16(get_fast_sampling_rate(), loop_limit, 8);
+        backend_rate_hz *= fast_sampling_rate;
+    }
+
     if (read_reg16(REG_DEV_ID) == DEV_ID_16607) {
         accel_scale = GRAVITY_MSS / 200000.0f;  // Accel: Dynamic Range ±40g. 24-bit data format 200000.0 LSB/g
         gyro_scale = radians(1.0 / 4000.0);     // Gyro: ADIS16607-3, 24-bit data format 4000.0 LSB/°/sec
         _clip_limit = 39.5f * GRAVITY_MSS;
+
+        switch (backend_rate_hz) {
+            case 2000:
+                expected_sample_rate_hz = 2390;
+                dec_rate = DEC_RATE_2390HZ;
+                break;
+            case 4000:
+                expected_sample_rate_hz = 4780;
+                dec_rate = DEC_RATE_4780HZ;
+                break;
+            case 8000:
+                expected_sample_rate_hz = 9560;
+                dec_rate = DEC_RATE_9560HZ;
+                break;
+            default:
+                expected_sample_rate_hz = 1195;
+                dec_rate = DEC_RATE_1195HZ;
+                break;
+        }
 
         return true;
     }
@@ -301,20 +198,7 @@ bool AP_InertialSensor_ADIS16607::init()
         return false;
     }
 
-    /**
-     * Ensure that the "BOOTLOAD_BUSY" bit (Bit 0) is low
-     * Otherwise, REG_DIAG_STAT may not be able to be cleared in some case.
-     */
-    tries = 10;
-    while ((read_reg16(REG_DIGITAL_STATUS) & 0x01) && --tries) {
-        hal.scheduler->delay(10);
-    }
-
-    if (tries == 0) {
-        return false;
-    }
-
-    // Ensure DIAG_STAT is 0x0000 for clear possible false errors
+    // Ensure DIGITAL_STATUS is 0x0000 for clear possible false errors
     tries = 10;
     while ((read_reg16(REG_DIAG_STAT) != 0x0000) && --tries) {
         hal.scheduler->delay(10);
@@ -324,7 +208,7 @@ bool AP_InertialSensor_ADIS16607::init()
         return false;
     }
 
-    // Ensure again that the "BOOTLOAD_BUSY" bit (Bit 0) is low
+    // Ensure that the "BOOTLOAD_BUSY" bit (Bit 0) is low
     tries = 10;
     while ((read_reg16(REG_DIGITAL_STATUS) & 0x01) && --tries) {
         hal.scheduler->delay(10);
@@ -333,6 +217,9 @@ bool AP_InertialSensor_ADIS16607::init()
     if (tries == 0) {
         return false;
     }
+
+    // Configure GPIO pins(GPIO3 as DR)
+    write_reg16(REG_USER_GPIO_CFG1, 0x0200, false);
 
     // Init USER_DATA_CFG register if we use burst read mode
     const uint16_t user_data_cfg = USER_DATA_CFG_X_ACCEL_EN | USER_DATA_CFG_Y_ACCEL_EN | USER_DATA_CFG_Z_ACCEL_EN |
@@ -345,6 +232,20 @@ bool AP_InertialSensor_ADIS16607::init()
 
     // Filter BW. fC=500Hz.
     if (!write_reg16(REG_MSC_CTRL, 0x100, true)) {
+        return false;
+    }
+
+    /**
+     * Bring rate down
+     * The actual decimation rate, D, is the DEC_RATE+1. Note that when changing the decimation rate, it is 
+     * recommended to first reset DEC_RATE to 0x000 before entering the new value. This 
+     * allows the decimation accumulator to reset.
+     */
+    if (!write_reg16(REG_DEC_RATE, 0, true)) {
+        return false;
+    }
+
+    if (!write_reg16(REG_DEC_RATE, dec_rate, true)) {
         return false;
     }
 
@@ -361,11 +262,8 @@ bool AP_InertialSensor_ADIS16607::init()
         return false;
     }
 
-    // If DIAG_STAT is not 0x0000, read twice.
     if (read_reg16(REG_DIAG_STAT) != 0x0000) {
-        if (read_reg16(REG_DIAG_STAT) != 0x0000) {
-            return false;
-        }
+        return false;
     }
 
     dev->set_speed(AP_HAL::Device::SPEED_HIGH);
@@ -494,9 +392,9 @@ void AP_InertialSensor_ADIS16607::read_sensor_fifo(void)
         } else if (ch == ADIS16607_FIFO_CHANNEL_MAX_INDEX) {
             need_sync = false;
         } else {
-            // Read to end of FIFO block (data discarded; the read advances the FIFO)
+            // Read to end of FIFO block
             while (fifo_word_num != 0) {
-                UNUSED_RESULT(read_reg16(REG_FIFO_DATA));
+                val = read_reg16(REG_FIFO_DATA);
                 ch = read_reg16(REG_FIFO_CH_INDEX);
                 fifo_word_num--;
                 if (ch == ADIS16607_FIFO_CHANNEL_MAX_INDEX) {

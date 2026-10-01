@@ -1,16 +1,13 @@
 '''
 AP_FLAKE8_CLEAN
 '''
-from emitter import Emitter
-from emitter import html_comment_safe
+import emitter
 
 
-class HTMLEmitter(Emitter):
+class HTMLEmitter(emitter.Emitter):
     def preface(self):
-        metadata = self.firmware_metadata()
-        metadata_block = f"\n\n{metadata}" if metadata else ""
-        return f"""<!-- Dynamically generated list of Logger Messages
-This page was generated using Tools/autotest/logger_metdata/parse.py{metadata_block}
+        return """<!-- Dynamically generated list of Logger Messages
+This page was generated using Tools/autotest/logger_metdata/parse.py
 
 DO NOT EDIT
 -->
@@ -25,14 +22,6 @@ DO NOT EDIT
 [toc exclude="Onboard Message Log Messages"]
 
 """
-
-    def firmware_metadata(self):
-        lines = []
-        if self.git_sha is not None:
-            lines.append(f"git_sha: {html_comment_safe(self.git_sha)}")
-        if self.git_branch is not None:
-            lines.append(f"git_branch: {html_comment_safe(self.git_branch)}")
-        return "\n".join(lines)
 
     def postface(self):
         return ""

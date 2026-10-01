@@ -149,17 +149,12 @@ bool AP_Servo_Telem::get_telem(const uint8_t servo_index, TelemetryData& telem) 
     }
 
     // Check if data has ever been received for the servo index provided
-    if (!is_active(servo_index)) {
+    if ((active_mask & (1U << servo_index)) == 0) {
         return false;
     }
 
     telem = *const_cast<TelemetryData*>(&_telem_data[servo_index]);
     return true;
-}
-
-bool AP_Servo_Telem::is_active(const uint8_t servo_index) const volatile
-{
-    return (active_mask & (1U << servo_index)) != 0;
 }
 
 // Get the AP_Servo_Telem singleton

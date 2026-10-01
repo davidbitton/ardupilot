@@ -292,12 +292,6 @@ const AP_Param::GroupInfo AP_Vehicle::var_info[] = {
     AP_SUBGROUPINFO(rpm_sensor, "RPM", 32, AP_Vehicle, AP_RPM),
 #endif
 
-#if AP_BEACON_ENABLED
-    // @Group: BCN
-    // @Path: ../AP_Beacon/AP_Beacon.cpp
-    AP_SUBGROUPINFO(beacon, "BCN", 33, AP_Vehicle, AP_Beacon),
-#endif  // AP_BEACON_ENABLED
-
     AP_GROUPEND
 };
 
@@ -433,11 +427,6 @@ void AP_Vehicle::setup()
 #if AP_GRIPPER_ENABLED
     AP::gripper().init();
 #endif
-
-    // init beacons used for non-gps position estimation
-#if AP_BEACON_ENABLED
-    beacon.init();
-#endif  // AP_BEACON_ENABLED
 
     // init_ardupilot is where the vehicle does most of its initialisation.
     init_ardupilot();
@@ -632,9 +621,6 @@ const AP_Scheduler::Task AP_Vehicle::scheduler_tasks[] = {
 #if HAL_GYROFFT_ENABLED
     FAST_TASK_CLASS(AP_GyroFFT,    &vehicle.gyro_fft,       sample_gyros),
 #endif
-#if AP_BEACON_ENABLED
-    SCHED_TASK_CLASS(AP_Beacon,    &vehicle.beacon,         update,                  400, 200, 24),
-#endif  // AP_BEACON_ENABLED
 #if AP_AIRSPEED_ENABLED
     SCHED_TASK_CLASS(AP_Airspeed,  &vehicle.airspeed,       update,                   10, 100, 41),    // NOTE: the priority number here should be right before Plane's calc_airspeed_errors
 #endif
@@ -894,14 +880,14 @@ void AP_Vehicle::update_dynamic_notch(AP_InertialSensor::HarmonicNotch &notch)
             if (notch.params.hasOption(HarmonicNotchFilterParams::Options::DynamicHarmonic)) {
                 float notches[INS_MAX_NOTCHES];
                 // ESC telemetry will return 0 for missing data, but only after 1s
-                const uint8_t num_notches = AP::esc_telem().get_motor_frequencies_hz(INS_MAX_NOTCHES, notches, notch.params.esc_mask());
+                const uint8_t num_notches = AP::esc_telem().get_motor_frequencies_hz(INS_MAX_NOTCHES, notches);
                 if (num_notches > 0) {
                     notch.update_frequencies_hz(num_notches, notches);
                 } else {    // throttle fallback
                     update_throttle_notch(notch);
                 }
             } else {
-                notch.update_freq_hz(AP::esc_telem().get_average_motor_frequency_hz(notch.params.esc_mask()) * ref);
+                notch.update_freq_hz(AP::esc_telem().get_average_motor_frequency_hz() * ref);
             }
             break;
 #endif
@@ -961,7 +947,9 @@ void AP_Vehicle::notify_no_such_mode(uint8_t mode_number)
 // flashing LEDs as appropriate
 void AP_Vehicle::reboot(bool hold_in_bootloader)
 {
-    SRV_Channels::prepare_for_reboot();
+    if (should_zero_rc_outputs_on_reboot()) {
+        SRV_Channels::zero_rc_outputs();
+    }
 
     // Notify might want to blink some LEDs:
     AP_Notify::flags.firmware_update = 1;
@@ -996,6 +984,10 @@ void AP_Vehicle::reboot(bool hold_in_bootloader)
 void AP_Vehicle::publish_osd_info()
 {
 #if AP_MISSION_ENABLED
+    AP_Mission *mission = AP::mission();
+    if (mission == nullptr) {
+        return;
+    }
     AP_OSD *osd = AP::osd();
     if (osd == nullptr) {
         return;
@@ -1012,25 +1004,20 @@ void AP_Vehicle::publish_osd_info()
     if (!get_wp_crosstrack_error_m(nav_info.wp_xtrack_error)) {
         return;
     }
-    nav_info.wp_number = AP::mission().get_current_nav_index();
+    nav_info.wp_number = mission->get_current_nav_index();
     osd->set_nav_info(nav_info);
 #endif
 }
 #endif
 
-void AP_Vehicle::get_osd_attitude_rad(float &roll, float &pitch, float &yaw)
+void AP_Vehicle::get_osd_roll_pitch_rad(float &roll, float &pitch) const
 {
 #if AP_AHRS_ENABLED
-    // Take semaphore as this can be called from a thread
-    WITH_SEMAPHORE(ahrs.get_semaphore());
-
     roll = ahrs.get_roll_rad();
     pitch = ahrs.get_pitch_rad();
-    yaw = ahrs.get_yaw_rad();
 #else
     roll = 0.0;
     pitch = 0.0;
-    yaw = 0.0;
 #endif
 }
 
@@ -1145,7 +1132,7 @@ void AP_Vehicle::check_motor_noise()
 #endif
 
     float esc_data[ESC_TELEM_MAX_ESCS];
-    const uint8_t numf = AP::esc_telem().get_motor_frequencies_hz(ESC_TELEM_MAX_ESCS, esc_data, 0xFFFFFFFF);
+    const uint8_t numf = AP::esc_telem().get_motor_frequencies_hz(ESC_TELEM_MAX_ESCS, esc_data);
     bool output_error = false;
 
     for (uint8_t i = 0; i<numf; i++) {

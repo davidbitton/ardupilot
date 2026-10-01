@@ -199,6 +199,12 @@ const AP_Param::GroupInfo SRV_Channels::var_info[] = {
     AP_SUBGROUPINFO(fetteconwire, "_FTW_",  25, SRV_Channels, AP_FETtecOneWire),
 #endif
 
+#if AP_CASTLELINK_ENABLED
+    // @Group: _CLL_
+    // @Path: ../AP_CastleLink/AP_CastleLink.cpp
+    AP_SUBGROUPINFO(castlelink, "_CLL_",  45, SRV_Channels, AP_CastleLink),
+#endif
+
     // @Param: _DSHOT_RATE
     // @DisplayName: Servo DShot output rate
     // @Description: DShot output rate for all outputs as a multiple of the loop rate. 0 sets the output rate to be fixed at 1Khz for low loop rates. This value should never be set below 500Hz.
@@ -511,6 +517,10 @@ void SRV_Channels::push()
     fetteconwire.update();
 #endif
 
+#if AP_CASTLELINK_ENABLED
+    castlelink.update();
+#endif
+
 #if AP_KDECAN_ENABLED
     if (AP::kdecan() != nullptr) {
         AP::kdecan()->update();
@@ -545,12 +555,22 @@ void SRV_Channels::push()
                 break;
         }
     }
-#endif // HAL_ENABLE_DRONECAN_DRIVERS
+#endif // HAL_NUM_CAN_IFACES
 }
 
-void SRV_Channels::prepare_for_reboot()
+void SRV_Channels::zero_rc_outputs()
 {
-    hal.rcout->prepare_for_reboot();
+    /* Send an invalid signal to the motors to prevent spinning due to
+     * neutral (1500) pwm pulse being cut short.  For that matter,
+     * send an invalid signal to all channels to prevent
+     * undesired/unexpected behavior
+     */
+    auto &srv = AP::srv();
+    srv.cork();
+    for (uint8_t i=0; i<NUM_SERVO_CHANNELS; i++) {
+        hal.rcout->write(i, 0);
+    }
+    srv.push();
 }
 
 /*

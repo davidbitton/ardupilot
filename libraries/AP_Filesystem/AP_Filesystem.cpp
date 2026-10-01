@@ -35,11 +35,6 @@ static AP_Filesystem_ESP32 fs_local;
 #elif AP_FILESYSTEM_LITTLEFS_ENABLED
 #include "AP_Filesystem_FlashMemory_LittleFS.h"
 static AP_Filesystem_FlashMemory_LittleFS fs_local;
-#if AP_FILESYSTEM_ALIAS_ENABLED
-// LittleFS holds its lock from opendir() to closedir().  alias_sem, held
-// across each call, would be released before it and could deadlock with it
-#error "alias filesystems are not supported on LittleFS"
-#endif  // AP_FILESYSTEM_ALIAS_ENABLED
 #elif AP_FILESYSTEM_POSIX_ENABLED
 #include "AP_Filesystem_posix.h"
 static AP_Filesystem_Posix fs_local;
@@ -68,59 +63,26 @@ static AP_Filesystem_Sys fs_sys;
 static AP_Filesystem_Mission fs_mission;
 #endif
 
-#if AP_FILESYSTEM_MAVLOG_ENABLED && !AP_FILESYSTEM_ALIAS_ENABLED
-#error "@MAV_LOG needs AP_FILESYSTEM_ALIAS_ENABLED"
-#endif  // AP_FILESYSTEM_MAVLOG_ENABLED && !AP_FILESYSTEM_ALIAS_ENABLED
-
-#if AP_FILESYSTEM_MAVLOG_ENABLED
-// defined below, once the HAL is in scope
-static const char *mavlog_root(void);
-
-// log directory + '/' + longest FTP request + '/' + longest name, or listings silently lose entries
-static_assert(sizeof(HAL_BOARD_LOG_DIRECTORY) + 1 + 238 + 1 + 255 <= AP_FILESYSTEM_ALIAS_PATH_MAX,
-              "AP_FILESYSTEM_ALIAS_PATH_MAX is too small for this board's log directory");
-#endif  // AP_FILESYSTEM_MAVLOG_ENABLED
-
 /*
   mapping from filesystem prefix to backend
  */
 const AP_Filesystem::Backend AP_Filesystem::backends[] = {
-    { nullptr, fs_local, nullptr },
+    { nullptr, fs_local },
 #if AP_FILESYSTEM_ROMFS_ENABLED
-    { "@ROMFS", fs_romfs, nullptr },
+    { "@ROMFS", fs_romfs },
 #endif
 #if AP_FILESYSTEM_PARAM_ENABLED
-    { "@PARAM", fs_param, nullptr },
+    { "@PARAM", fs_param },
 #endif
 #if AP_FILESYSTEM_SYS_ENABLED
-    { "@SYS", fs_sys, nullptr },
+    { "@SYS", fs_sys },
 #endif
 #if AP_FILESYSTEM_MISSION_ENABLED
-    { "@MISSION", fs_mission, nullptr },
-#endif  // AP_FILESYSTEM_MISSION_ENABLED
-#if AP_FILESYSTEM_MAVLOG_ENABLED
-    // an alias for the log directory on the local filesystem
-    { "@MAV_LOG", fs_local, mavlog_root },
+    { "@MISSION", fs_mission },
 #endif
 };
 
 extern const AP_HAL::HAL& hal;
-
-#if AP_FILESYSTEM_MAVLOG_ENABLED
-/*
-  the log directory, chosen as AP_Logger_File does.  the static_assert can't
-  see a custom directory, so a long one can push long listing paths past
-  AP_FILESYSTEM_ALIAS_PATH_MAX
- */
-static const char *mavlog_root(void)
-{
-    const char *custom_dir = hal.util->get_custom_log_directory();
-    if (custom_dir != nullptr) {
-        return custom_dir;
-    }
-    return HAL_BOARD_LOG_DIRECTORY;
-}
-#endif  // AP_FILESYSTEM_MAVLOG_ENABLED
 
 #define MAX_FD_PER_BACKEND 256U
 #define NUM_BACKENDS ARRAY_SIZE(backends)
@@ -139,12 +101,7 @@ const AP_Filesystem::Backend &AP_Filesystem::backend_by_path(const char *&path) 
     }
     for (uint8_t i=1; i<NUM_BACKENDS; i++) {
         const uint8_t plen = strlen(backends[i].prefix);
-        if (strncmp(path_with_no_leading_slash, backends[i].prefix, plen) != 0) {
-            continue;
-        }
-        // the prefix must be the whole first component ("@SYSfoo" is not @SYS)
-        const char after = path_with_no_leading_slash[plen];
-        if (after == 0 || after == '/') {
+        if (strncmp(path_with_no_leading_slash, backends[i].prefix, plen) == 0) {
             path = path_with_no_leading_slash;
             path += plen;
             if (strlen(path) > 0 && path[0] == '/') {
@@ -155,74 +112,6 @@ const AP_Filesystem::Backend &AP_Filesystem::backend_by_path(const char *&path) 
     }
     // default to local filesystem
     return LOCAL_BACKEND;
-}
-
-// resolve a path to its backend, rewriting it if the prefix is an alias
-AP_Filesystem::ResolvedPath::ResolvedPath(AP_Filesystem &filesystem, const char *path, Buffer buffer) :
-    _backend(&filesystem.backend_by_path(path)),
-    _path(path)
-#if AP_FILESYSTEM_ALIAS_ENABLED
-    ,_filesystem(filesystem),
-    _own_buffer(nullptr),
-    _holds_shared_buffer(false)
-#endif  // AP_FILESYSTEM_ALIAS_ENABLED
-{
-#if AP_FILESYSTEM_ALIAS_ENABLED
-    if (_backend->root == nullptr) {
-        // not an alias; the backend takes the path as it stands
-        return;
-    }
-
-    char *rewritten;
-    if (buffer == Buffer::OWN) {
-        _own_buffer = NEW_NOTHROW char[AP_FILESYSTEM_ALIAS_PATH_MAX];
-        rewritten = _own_buffer;
-    } else {
-        // held until the destructor; see the warning on alias_sem
-        filesystem.alias_sem.take_blocking();
-        if (filesystem.alias_path_in_use) {
-            // this thread already has the buffer, still in use
-            filesystem.alias_sem.give();
-            _path = nullptr;
-            errno = EBUSY;
-            return;
-        }
-        _holds_shared_buffer = true;
-        filesystem.alias_path_in_use = true;
-        if (filesystem.alias_path == nullptr) {
-            filesystem.alias_path = NEW_NOTHROW char[AP_FILESYSTEM_ALIAS_PATH_MAX];
-        }
-        rewritten = filesystem.alias_path;
-    }
-    if (rewritten == nullptr) {
-        _path = nullptr;
-        errno = ENOMEM;
-        return;
-    }
-
-    const char *dir = _backend->root();
-    const size_t dir_len = strlen(dir);
-    // don't double a separator the root already ends in
-    const char *sep = (dir_len > 0 && dir[dir_len - 1] != '/' && _path[0] != 0) ? "/" : "";
-    if (uint32_t(hal.util->snprintf(rewritten, AP_FILESYSTEM_ALIAS_PATH_MAX, "%s%s%s", dir, sep, _path)) >= AP_FILESYSTEM_ALIAS_PATH_MAX) {
-        // refuse rather than truncate: a shortened path may name another file
-        _path = nullptr;
-        errno = ENAMETOOLONG;
-        return;
-    }
-    _path = rewritten;
-#endif  // AP_FILESYSTEM_ALIAS_ENABLED
-}
-
-AP_Filesystem::ResolvedPath::~ResolvedPath()
-{
-#if AP_FILESYSTEM_ALIAS_ENABLED
-    delete[] _own_buffer;
-    if (_holds_shared_buffer) {
-        _filesystem.alias_path_in_use = false;
-        _filesystem.alias_sem.give();
-    }
-#endif  // AP_FILESYSTEM_ALIAS_ENABLED
 }
 
 /*
@@ -240,12 +129,8 @@ const AP_Filesystem::Backend &AP_Filesystem::backend_by_fd(int &fd) const
 
 int AP_Filesystem::open(const char *fname, int flags, bool allow_absolute_paths)
 {
-    const ResolvedPath resolved { *this, fname };
-    if (!resolved.valid()) {
-        return -1;
-    }
-    const Backend &backend = resolved.backend();
-    int fd = backend.fs.open(resolved.path(), flags, allow_absolute_paths);
+    const Backend &backend = backend_by_path(fname);
+    int fd = backend.fs.open(fname, flags, allow_absolute_paths);
     if (fd < 0) {
         return -1;
     }
@@ -292,51 +177,35 @@ int32_t AP_Filesystem::lseek(int fd, int32_t offset, int seek_from)
 
 int AP_Filesystem::stat(const char *pathname, struct stat *stbuf)
 {
-    const ResolvedPath resolved { *this, pathname };
-    if (!resolved.valid()) {
-        return -1;
-    }
-    return resolved.backend().fs.stat(resolved.path(), stbuf);
+    const Backend &backend = backend_by_path(pathname);
+    return backend.fs.stat(pathname, stbuf);
 }
 
 int AP_Filesystem::unlink(const char *pathname)
 {
-    const ResolvedPath resolved { *this, pathname };
-    if (!resolved.valid()) {
-        return -1;
-    }
-    return resolved.backend().fs.unlink(resolved.path());
+    const Backend &backend = backend_by_path(pathname);
+    return backend.fs.unlink(pathname);
 }
 
 int AP_Filesystem::mkdir(const char *pathname)
 {
-    const ResolvedPath resolved { *this, pathname };
-    if (!resolved.valid()) {
-        return -1;
-    }
-    return resolved.backend().fs.mkdir(resolved.path());
+    const Backend &backend = backend_by_path(pathname);
+    return backend.fs.mkdir(pathname);
 }
 
 int AP_Filesystem::rename(const char *oldpath, const char *newpath)
 {
-    const ResolvedPath oldresolved { *this, oldpath };
+    const Backend &oldbackend = backend_by_path(oldpath);
 
     // Don't need the backend again, but we also need to remove the backend pre-fix from the new path.
-    // a second live path can't share the alias buffer
-    const ResolvedPath newresolved { *this, newpath, ResolvedPath::Buffer::OWN };
+    const Backend &newbackend = backend_by_path(newpath);
 
-    if (!oldresolved.valid() || !newresolved.valid()) {
+    // Don't try and rename between backends.
+    if (&oldbackend != &newbackend) {
         return -1;
     }
 
-    // Don't try and rename between filesystems.  an alias shares its
-    // filesystem with other paths, so compare those rather than table rows
-    if (&oldresolved.backend().fs != &newresolved.backend().fs) {
-        errno = EXDEV;
-        return -1;
-    }
-
-    return oldresolved.backend().fs.rename(oldresolved.path(), newresolved.path());
+    return oldbackend.fs.rename(oldpath, newpath);
 }
 
 AP_Filesystem::DirHandle *AP_Filesystem::opendir(const char *pathname)
@@ -355,16 +224,12 @@ AP_Filesystem::DirHandle *AP_Filesystem::opendir(const char *pathname)
         virtual_dirent.backend_ofs = 255;
     }
 
-    const ResolvedPath resolved { *this, pathname };
-    if (!resolved.valid()) {
-        return nullptr;
-    }
-    const Backend &backend = resolved.backend();
+    const Backend &backend = backend_by_path(pathname);
     DirHandle *h = NEW_NOTHROW DirHandle;
     if (!h) {
         return nullptr;
     }
-    h->dir = backend.fs.opendir(resolved.path());
+    h->dir = backend.fs.opendir(pathname);
     if (h->dir == nullptr) {
         delete h;
         return nullptr;
@@ -395,10 +260,8 @@ struct dirent *AP_Filesystem::readdir(DirHandle *dirp)
             continue;
         }
 
-        // only return @ entries in root if we can successfully opendir them
-        // (an alias at its own root)
-        const Backend &probed = backends[virtual_dirent.backend_ofs];
-        auto *d = probed.fs.opendir(probed.root != nullptr ? probed.root() : "");
+        // only return @ entries in root if we can successfully opendir them:
+        auto *d = backends[virtual_dirent.backend_ofs].fs.opendir("");
         if (d == nullptr) {
             continue;
         }
@@ -434,21 +297,15 @@ uint32_t AP_Filesystem::bytes_until_fsync(int fd)
 // return free disk space in bytes
 int64_t AP_Filesystem::disk_free(const char *path)
 {
-    const ResolvedPath resolved { *this, path };
-    if (!resolved.valid()) {
-        return -1;
-    }
-    return resolved.backend().fs.disk_free(resolved.path());
+    const Backend &backend = backend_by_path(path);
+    return backend.fs.disk_free(path);
 }
 
 // return total disk space in bytes
 int64_t AP_Filesystem::disk_space(const char *path)
 {
-    const ResolvedPath resolved { *this, path };
-    if (!resolved.valid()) {
-        return -1;
-    }
-    return resolved.backend().fs.disk_space(resolved.path());
+    const Backend &backend = backend_by_path(path);
+    return backend.fs.disk_space(path);
 }
 
 
@@ -457,11 +314,8 @@ int64_t AP_Filesystem::disk_space(const char *path)
  */
 bool AP_Filesystem::set_mtime(const char *filename, const uint32_t mtime_sec)
 {
-    const ResolvedPath resolved { *this, filename };
-    if (!resolved.valid()) {
-        return false;
-    }
-    return resolved.backend().fs.set_mtime(resolved.path(), mtime_sec);
+    const Backend &backend = backend_by_path(filename);
+    return backend.fs.set_mtime(filename, mtime_sec);
 }
 
 // if filesystem is not running then try a remount
@@ -483,24 +337,13 @@ void AP_Filesystem::unmount(void)
  */
 FileData *AP_Filesystem::load_file(const char *filename)
 {
-    const ResolvedPath resolved { *this, filename };
-    if (!resolved.valid()) {
-        return nullptr;
-    }
-    return resolved.backend().fs.load_file(resolved.path());
+    const Backend &backend = backend_by_path(filename);
+    return backend.fs.load_file(filename);
 }
 
-// reads a line into buf, guaranteeing null-termination.  buflen is
-// the full size of buf, including the space required for the null
-// terminator, so up to buflen-1 characters are returned.  cr or lf
-// terminates the line and is consumed but not returned.
+// returns null-terminated string; cr or lf terminates line
 bool AP_Filesystem::fgets(char *buf, uint8_t buflen, int fd)
 {
-    if (buflen == 0) {
-        // we can't null-terminate the buffer, which we guarantee
-        return false;
-    }
-
     const Backend &backend = backend_by_fd(fd);
 
     // we will need to seek back to the right location at the end
@@ -509,7 +352,7 @@ bool AP_Filesystem::fgets(char *buf, uint8_t buflen, int fd)
         return false;
     }
 
-    auto n = backend.fs.read(fd, buf, buflen-1U);
+    auto n = backend.fs.read(fd, buf, buflen);
     if (n <= 0) {
         return false;
     }
@@ -522,13 +365,8 @@ bool AP_Filesystem::fgets(char *buf, uint8_t buflen, int fd)
     }
     buf[i] = '\0';
 
-    // get back to the right offset, consuming the line terminator if
-    // we found one.  If we did not find one we have either filled the
-    // buffer or returned an unterminated final line; in both cases
-    // the seek target must not extend past the data we consumed -
-    // backends such as ROMFS refuse to seek past the end of the file.
-    const int32_t new_offset = offset_start + i + (i < n ? 1 : 0);
-    if (backend.fs.lseek(fd, new_offset, SEEK_SET) != new_offset) {
+    // get back to the right offset
+    if (backend.fs.lseek(fd, offset_start+i+1, SEEK_SET) != offset_start+i+1) {
         // we need to fail if we can't seek back or the caller may loop or get corrupt data
         return false;
     }

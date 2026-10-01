@@ -118,6 +118,7 @@ COMMON_VEHICLE_DEPENDENT_LIBRARIES = [
     'AP_ExternalAHRS',
     'AP_VideoTX',
     'AP_FETtecOneWire',
+    'AP_CastleLink',
     'AP_TemperatureSensor',
     'AP_Torqeedo',
     'AP_CustomRotations',
@@ -131,7 +132,6 @@ COMMON_VEHICLE_DEPENDENT_LIBRARIES = [
     'AP_RCMapper',
     'AP_MultiHeap',
     'AP_Follow',
-    'AP_GroundEffect',
 ]
 
 def get_legacy_defines(sketch_name, bld):

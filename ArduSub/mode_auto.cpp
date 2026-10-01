@@ -439,10 +439,9 @@ bool ModeAuto::auto_terrain_recover_start()
         sub.auto_mode = Auto_TerrainRecover;
         break;
 
-    case RangeFinder::Status::NotConnected:
-    case RangeFinder::Status::NoData:
-    case RangeFinder::Status::PoweredDown:
-        return false;
+        // Not connected or no data
+    default:
+        return false; // Rangefinder is not connected, or has stopped responding
     }
 
     // Initialize recovery timeout time
@@ -498,7 +497,7 @@ void ModeAuto::auto_terrain_recover_run()
         break;
 
     case RangeFinder::Status::OutOfRangeHigh:
-        target_climb_rate = -sub.wp_nav.get_default_speed_down_cms();
+        target_climb_rate = sub.wp_nav.get_default_speed_down_cms();
         rangefinder_recovery_ms = 0;
         break;
 
@@ -527,9 +526,8 @@ void ModeAuto::auto_terrain_recover_run()
         }
         break;
 
-    case RangeFinder::Status::NotConnected:
-    case RangeFinder::Status::NoData:
-    case RangeFinder::Status::PoweredDown:
+        // Not connected, or no data
+    default:
         // Terrain failsafe recovery has failed, terrain data is not available
         // and rangefinder is not connected, or has stopped responding
         gcs().send_text(MAV_SEVERITY_CRITICAL, "Terrain failsafe recovery failure: No Rangefinder!");
@@ -540,7 +538,6 @@ void ModeAuto::auto_terrain_recover_run()
 #else
     gcs().send_text(MAV_SEVERITY_CRITICAL, "Terrain failsafe recovery failure: No Rangefinder!");
     sub.failsafe_terrain_act();
-    return;
 #endif
 
     // exit on failure (timeout)
@@ -548,7 +545,6 @@ void ModeAuto::auto_terrain_recover_run()
         // Recovery has failed, revert to failsafe action
         gcs().send_text(MAV_SEVERITY_CRITICAL, "Terrain failsafe recovery timeout!");
         sub.failsafe_terrain_act();
-        return;
     }
 
     // run loiter controller

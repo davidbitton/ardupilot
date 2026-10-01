@@ -293,7 +293,6 @@ def kill_tasks():
             'runsim.py',
             'AntennaTracker.elf',
             'scrimmage',
-            'last_letter_ardupilot',
             'ardurover',
             'arduplane',
             'arducopter'
@@ -734,8 +733,8 @@ def find_geocoder_location(locname):
     return [lat, lon, alt, 0.0]
 
 
-def parse_locations():
-    """Yield (name, [lat, lon, alt, heading]) tuples from locations files."""
+def find_location_by_name(locname):
+    """Search locations.txt for locname, return GPS coords"""
     locations_userpath = os.environ.get('ARDUPILOT_LOCATIONS',
                                         get_user_locations_path())
     locations_filepath = os.path.join(autotest_dir, "locations.txt")
@@ -750,19 +749,8 @@ def parse_locations():
                 if len(line) == 0:
                     continue
                 (name, loc) = line.split("=")
-                yield (name, [float(x) for x in loc.split(",")])
-
-
-def list_locations():
-    """Return the location names from the user and autotest locations.txt"""
-    return [name for name, _ in parse_locations()]
-
-
-def find_location_by_name(locname):
-    """Search locations.txt for locname, return GPS coords"""
-    for name, loc in parse_locations():
-        if name == locname:
-            return loc
+                if name == locname:
+                    return [(float)(x) for x in loc.split(",")]
 
     # fallback to geocoder if available
     loc = find_geocoder_location(locname)
@@ -857,22 +845,17 @@ def start_antenna_tracker(opts):
     tracker_instance = 1
     oldpwd = os.getcwd()
     os.chdir(vehicledir)
-    if opts.unix_domain_socket:
-        tracker_serial0 = "uds:" + util.unix_domain_socket_path(0, vehicledir)
-    else:
-        tracker_serial0 = "tcp:127.0.0.1:" + str(5760 + 10 * tracker_instance)
+    tracker_serial0 = "tcp:127.0.0.1:" + str(5760 + 10 * tracker_instance)
     binary_basedir = "build/sitl"
     exe = os.path.join(root_dir,
                        binary_basedir,
                        "bin/antennatracker")
-    cmd = ["nice",
-           exe,
-           "-I" + str(tracker_instance),
-           "--model=tracker",
-           "--home=" + ",".join([str(x) for x in tracker_home])]
-    if opts.unix_domain_socket:
-        cmd.extend(util.unix_domain_socket_serial_args())
-    run_in_terminal_window("AntennaTracker", cmd)
+    run_in_terminal_window("AntennaTracker",
+                           ["nice",
+                            exe,
+                            "-I" + str(tracker_instance),
+                            "--model=tracker",
+                            "--home=" + ",".join([str(x) for x in tracker_home])])
     os.chdir(oldpwd)
 
 
@@ -990,9 +973,6 @@ def start_vehicle(binary, opts, stuff, spawns=None):
         cmd.extend(["--slave", str(opts.slave)])
     if opts.enable_fgview:
         cmd.extend(["--enable-fgview"])
-    if opts.unix_domain_socket:
-        cmd.extend(util.unix_domain_socket_serial_args())
-        cmd.append("--rc-in-port=uds:APM-UDS-rcin")
     if opts.sitl_instance_args:
         # this could be a lot better:
         cmd.extend(opts.sitl_instance_args)
@@ -1099,9 +1079,9 @@ def start_mavproxy(opts, stuff):
     if under_cygwin():
         cmd.append("/usr/bin/cygstart")
         cmd.append("-w")
-        cmd.append(os.getenv('MAVPROXY_CMD', "mavproxy.exe"))
+        cmd.append("mavproxy.exe")
     else:
-        cmd.append(util.mavproxy_cmd())
+        cmd.append("mavproxy.py")
 
     if opts.valgrind:
         cmd.extend(['--retries', '10'])
@@ -1115,7 +1095,7 @@ def start_mavproxy(opts, stuff):
     # This is run before the loop so it only runs once
     wsl2_host_ip_str = wsl2_host_ip()
 
-    for i, i_dir in zip(instances, instance_dir):
+    for i in instances:
         if not opts.no_extra_ports:
             ports = [14550 + 10 * i]
             for port in ports:
@@ -1133,15 +1113,10 @@ def start_mavproxy(opts, stuff):
         if not opts.mcast:
             if opts.udp:
                 cmd.extend(["--master", ":" + str(5760 + 10 * i)])
-            elif opts.unix_domain_socket:
-                cmd.extend(["--master", "uds:" + util.unix_domain_socket_path(0, i_dir)])
             else:
                 cmd.extend(["--master", "tcp:127.0.0.1:" + str(5760 + 10 * i)])
         if stuff["sitl-port"] and not opts.no_rcin:
-            if opts.unix_domain_socket:
-                cmd.extend(["--sitl", "uds:" + util.unix_domain_socket_rcin_path(i_dir)])
-            else:
-                cmd.extend(["--sitl", "127.0.0.1:" + str(5501 + 10 * i)])
+            cmd.extend(["--sitl", "127.0.0.1:" + str(5501 + 10 * i)])
 
     if opts.tracker:
         cmd.extend(["--load-module", "tracker"])
@@ -1519,10 +1494,6 @@ group_sim.add_option("", "--udp",
                      action="store_true",
                      default=False,
                      help="Use UDP on 127.0.0.1:5760")
-group_sim.add_option("--unix-domain-socket", "--uds",
-                     action="store_true",
-                     default=False,
-                     help="Use Unix domain sockets; each instance requires a separate working directory")
 group_sim.add_option("", "--osd",
                      action='store_true',
                      dest='OSD',
@@ -1667,9 +1638,6 @@ group_completion.add_option("", "--list-frame",
                             type='string',
                             default=None,
                             help="List the vehicle frames")
-group_completion.add_option("", "--list-locations",
-                            action='store_true',
-                            help="List the locations")
 parser.add_option_group(group_completion)
 
 cmd_opts, cmd_args = parser.parse_args()
@@ -1710,9 +1678,6 @@ if cmd_opts.list_frame:
     frame_options = sorted(vinfo.options[cmd_opts.list_frame]["frames"].keys())
     frame_options_string = ' '.join(frame_options)
     print(frame_options_string)
-    sys.exit(1)
-if cmd_opts.list_locations:
-    print(' '.join(list_locations()))
     sys.exit(1)
 
 # clean up processes at exit:
@@ -1756,10 +1721,6 @@ if cmd_opts.strace and cmd_opts.callgrind:
 
 if cmd_opts.sysid and cmd_opts.auto_sysid:
     print("Cannot use auto-sysid together with sysid")
-    sys.exit(1)
-
-if cmd_opts.unix_domain_socket and (cmd_opts.mcast or cmd_opts.udp):
-    print("Cannot use unix domain sockets together with multicast or UDP")
     sys.exit(1)
 
 # magically determine vehicle type (if required):

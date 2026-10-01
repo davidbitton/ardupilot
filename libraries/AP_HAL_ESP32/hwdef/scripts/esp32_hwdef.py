@@ -9,6 +9,7 @@ AP_FLAKE8_CLEAN
 import argparse
 import os
 import re
+import shlex
 import sys
 
 from dataclasses import dataclass
@@ -61,7 +62,7 @@ class ESP32HWDef(hwdef.HWDef):
         self.all_lines.append(line)
         self.alllines.append(line)
 
-        a = self.split_line(line, posix=False)
+        a = shlex.split(line, posix=False)
         if a[0] == 'ESP32_I2CBUS':
             self.process_line_esp32_i2cbus(line, depth, a)
 
@@ -82,7 +83,7 @@ class ESP32HWDef(hwdef.HWDef):
         if a[0] == 'ESP32_SDSPI':
             self.process_line_esp32_sdspi(line, depth, a)
 
-        super(ESP32HWDef, self).process_line(line, depth, a)
+        super(ESP32HWDef, self).process_line(line, depth)
 
     # ESP32_I2CBUS support:
     def process_line_esp32_i2cbus(self, line, depth, a):

@@ -51,9 +51,9 @@ void ModeGuided::update()
 
         case SubMode::HeadingAndSpeed:
         {
-            // stop vehicle if target not updated within GUID_TIMEOUT seconds
-            if (have_attitude_target && (millis() - _des_att_time_ms) > get_timeout_ms()) {
-                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "target not received last %.1f secs, stopping", get_timeout_ms()/1000.0f);
+            // stop vehicle if target not updated within 3 seconds
+            if (have_attitude_target && (millis() - _des_att_time_ms) > 3000) {
+                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "target not received last 3secs, stopping");
                 have_attitude_target = false;
             }
             if (have_attitude_target) {
@@ -75,9 +75,9 @@ void ModeGuided::update()
 
         case SubMode::TurnRateAndSpeed:
         {
-            // stop vehicle if target not updated within GUID_TIMEOUT seconds
-            if (have_attitude_target && (millis() - _des_att_time_ms) > get_timeout_ms()) {
-                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "target not received last %.1f secs, stopping", get_timeout_ms()/1000.0f);
+            // stop vehicle if target not updated within 3 seconds
+            if (have_attitude_target && (millis() - _des_att_time_ms) > 3000) {
+                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "target not received last 3secs, stopping");
                 have_attitude_target = false;
             }
             if (have_attitude_target) {
@@ -110,9 +110,9 @@ void ModeGuided::update()
         case SubMode::SteeringAndThrottle:
         {
             // handle timeout
-            if (_have_strthr && (AP_HAL::millis() - _strthr_time_ms) > get_timeout_ms()) {
+            if (_have_strthr && (AP_HAL::millis() - _strthr_time_ms) > 3000) {
                 _have_strthr = false;
-                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "target not received last %.1f secs, stopping", get_timeout_ms()/1000.0f);
+                GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "target not received last 3secs, stopping");
             }
             if (_have_strthr) {
                 // pass latest steering and throttle directly to motors library
@@ -167,7 +167,6 @@ float ModeGuided::nav_bearing() const
     case SubMode::WP:
         return g2.wp_nav.nav_bearing_cd() * 0.01f;
     case SubMode::HeadingAndSpeed:
-        return have_attitude_target ? wrap_180(_desired_yaw_cd * 0.01f) : 0.0f;
     case SubMode::TurnRateAndSpeed:
         return 0.0f;
     case SubMode::Loiter:
@@ -453,10 +452,4 @@ bool ModeGuided::limit_breached() const
 bool ModeGuided::use_scurves_for_navigation() const
 {
     return ((g2.guided_options.get() & uint32_t(Options::SCurvesUsedForNavigation)) != 0);
-}
-
-// return guided mode timeout in milliseconds. Only used for velocity, throttle, heading or turn rate control
-uint32_t ModeGuided::get_timeout_ms() const
-{
-    return MAX(g2.guided_timeout, 0.1) * 1000;
 }

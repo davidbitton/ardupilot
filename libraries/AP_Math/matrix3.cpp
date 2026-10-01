@@ -80,12 +80,7 @@ void Matrix3<T>::from_rotation(enum Rotation rotation)
 template <typename T>
 Vector3<T> Matrix3<T>::to_euler312() const
 {
-    // c.y is a rotation matrix element, so mathematically in [-1, 1];
-    // a matrix which has lost orthonormality to accumulated float error
-    // pushes it just outside, and asinF() answers that with NaN on a
-    // vehicle and a trapped FE_INVALID under SITL.  to_euler() has used
-    // safe_asin() for the same reason since it was written.
-    return Vector3<T>(safe_asin(c.y),
+    return Vector3<T>(asinF(c.y),
                       atan2F(-c.x, c.z),
                       atan2F(-a.y, b.y));
 }

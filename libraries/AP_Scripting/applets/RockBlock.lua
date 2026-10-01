@@ -777,7 +777,7 @@ function HLSatcom()
         -- update HL2 packet
         hl2.timestamp = millis():tofloat()
         local position = ahrs:get_location()
-        local wind = ahrs:get_wind()
+        local wind = ahrs:wind_estimate()
 
         if position then
             hl2.latitude = tonumber(position:lat())

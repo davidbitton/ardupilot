@@ -317,4 +317,4 @@ void AP_InertialSensor_NONE::start()
 
 }
 
-#endif // CONFIG_HAL_BOARD == HAL_BOARD_ESP32
+#endif // HAL_BOARD_NONE

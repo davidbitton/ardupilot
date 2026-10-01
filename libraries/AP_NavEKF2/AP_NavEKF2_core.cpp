@@ -150,8 +150,9 @@ void NavEKF2_core::InitialiseVariables()
     lastGpsAidBadTime_ms = 0;
     timeTasReceived_ms = 0;
     lastPreAlignGpsCheckTime_ms = imuSampleTime_ms;
-    posNEResetCount = 0;
-    posDResetCount = 0;
+    lastPosReset_ms = 0;
+    lastVelReset_ms = 0;
+    lastPosResetD_ms = 0;
     lastRngMeasTime_ms = 0;
 
     // initialise other variables
@@ -199,7 +200,8 @@ void NavEKF2_core::InitialiseVariables()
     gpsHgtAccuracy = 0.0f;
     baroHgtOffset = 0.0f;
     rngOnGnd = 0.05f;
-    yawResetCount = 0;
+    yawResetAngle = 0.0f;
+    lastYawReset_ms = 0;
     tiltErrFilt = 1.0f;
     tiltAlignComplete = false;
     stateIndexLim = 23;
@@ -230,6 +232,7 @@ void NavEKF2_core::InitialiseVariables()
     airSpdFusionDelayed = false;
     sideSlipFusionDelayed = false;
     posResetNE.zero();
+    velResetNE.zero();
     posResetD = 0.0f;
     hgtInnovFiltState = 0.0f;
 
@@ -1615,8 +1618,15 @@ QuaternionF NavEKF2_core::calcQuatAndFieldStates(ftype roll, ftype pitch)
         yaw = magDecAng - magHeading;
 
         // calculate initial filter quaternion states using yaw from magnetometer
-        // record the reset so that it can be detected externally for use by the control loops to prevent yaw disturbances following a reset
-        yawResetCount++;
+        // store the yaw change so that it can be retrieved externally for use by the control loops to prevent yaw disturbances following a reset
+        Vector3F tempEuler;
+        stateStruct.quat.to_euler(tempEuler.x, tempEuler.y, tempEuler.z);
+        // this check ensures we accumulate the resets that occur within a single iteration of the EKF
+        if (imuSampleTime_ms != lastYawReset_ms) {
+            yawResetAngle = 0.0f;
+        }
+        yawResetAngle += wrap_PI(yaw - tempEuler.z);
+        lastYawReset_ms = imuSampleTime_ms;
         // calculate an initial quaternion using the new yaw value
         initQuat.from_euler(roll, pitch, yaw);
         // zero the attitude covariances because the corelations will now be invalid

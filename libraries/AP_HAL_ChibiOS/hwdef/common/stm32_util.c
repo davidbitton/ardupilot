@@ -451,7 +451,7 @@ void fault_printf(const char *fmt, ...)
     va_end(ap);
     fault_send_string(buffer);
 }
-#endif // HAL_GPIO_PIN_FAULT
+#endif // HAL_GPIO_PIN_HARDFAULT
 
 void system_halt_hook(void)
 {

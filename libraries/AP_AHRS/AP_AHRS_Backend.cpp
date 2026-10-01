@@ -202,9 +202,7 @@ void AP_AHRS::update_AOA_SSA(void)
         return;
     }
 
-    // use the wind estimate even if it is not marked valid; a zero or
-    // stale wind vector simply degrades the AOA/SSA estimate
-    IGNORE_RETURN(get_wind(aoa_wind));
+    aoa_wind = wind_estimate();
 
     // Rotate vectors to the body frame and calculate velocity and wind
     const Matrix3f &rot = get_rotation_body_to_ned();
@@ -275,7 +273,7 @@ void AP_AHRS::Log_Write_Home_And_Origin()
 
 // get apparent to true airspeed ratio
 float AP_AHRS_Backend::get_EAS2TAS(void) {
-    return AP::baro().get_EAS2TAS();
+    return AP::baro()._get_EAS2TAS();
 }
 
 // return current vibration vector for primary IMU

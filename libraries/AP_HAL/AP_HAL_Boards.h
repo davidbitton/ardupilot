@@ -228,10 +228,6 @@
 #define HAL_OS_LITTLEFS_IO 0
 #endif
 
-#ifndef AP_REBOOT_MASS_STORAGE_ENABLED
-#define AP_REBOOT_MASS_STORAGE_ENABLED 0
-#endif
-
 #ifndef HAL_BARO_DEFAULT
 #define HAL_BARO_DEFAULT HAL_BARO_NONE
 #endif
@@ -337,16 +333,16 @@
 #if defined(STM32H7) || CONFIG_HAL_BOARD == HAL_BOARD_SITL || CONFIG_HAL_BOARD == HAL_BOARD_LINUX
 // Enough for a double-notch per motor on an octa using three IMUs and one harmonics
 // plus one static notch with one double-notch harmonics
-#define HAL_HNF_MAX_FILTERS 78
+#define HAL_HNF_MAX_FILTERS 54
 #elif defined(STM32F7)
 // Enough for a notch per motor on an octa using three IMUs and one harmonics
 // plus one static notch with one harmonics
-#define HAL_HNF_MAX_FILTERS 39
+#define HAL_HNF_MAX_FILTERS 27
 #else
 // Enough for a notch per motor on an octa quad using two IMUs and one harmonic
 // plus one static notch with one harmonic
 // Or triple-notch per motor on one IMU with one harmonic
-#define HAL_HNF_MAX_FILTERS 30
+#define HAL_HNF_MAX_FILTERS 24
 #endif
 #endif // HAL_HNF_MAX_FILTERS
 

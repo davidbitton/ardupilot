@@ -74,11 +74,7 @@ private:
 
     Location home;
     const char *target_address = "127.0.0.1";
-    // SERIAL0's TCP port for *this* SITL instance.  -I moves that port
-    // by ten per instance, so a fixed 5762 only ever reaches instance
-    // zero - from anywhere else the beacon goes to another vehicle, or
-    // nowhere, and ours refuses to arm with "Ship: no beacon".
-    uint16_t target_port = 5762;
+    const uint16_t target_port = 5762;
 
     bool initialised;
     Ship ship;

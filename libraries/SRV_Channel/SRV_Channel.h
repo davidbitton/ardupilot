@@ -22,14 +22,9 @@
 #include <AP_SBusOut/AP_SBusOut.h>
 #include <AP_BLHeli/AP_BLHeli.h>
 #include <AP_FETtecOneWire/AP_FETtecOneWire.h>
+#include <AP_CastleLink/AP_CastleLink.h>
 
 #include "SRV_Channel_config.h"
-
-#ifndef ACTUATOR_CHANNELS
-#define ACTUATOR_CHANNELS 6
-#endif
-
-#define ACTUATOR_DEFAULT_INCREMENT 0.01
 
 static_assert(NUM_SERVO_CHANNELS <= 32, "More than 32 servos not supported");
 
@@ -565,6 +560,9 @@ public:
 #endif
     }
 
+    // SERVO* parameters
+    static void upgrade_parameters(void);
+
     // given a zero-based motor channel, return the k_motor function for that channel
     static SRV_Channel::Function get_motor_function(uint8_t channel) {
         if (channel < 8) {
@@ -603,9 +601,7 @@ public:
         return _singleton;
     }
 
-    // called once a reboot has been commanded: stop driving the
-    // outputs so the reset cannot truncate a pulse in flight
-    static void prepare_for_reboot();
+    static void zero_rc_outputs();
 
     // initialize before any call to push
     void init(uint32_t motor_mask = 0, AP_HAL::RCOutput::output_mode mode = AP_HAL::RCOutput::MODE_PWM_NONE);
@@ -668,6 +664,10 @@ private:
 #if AP_FETTEC_ONEWIRE_ENABLED
     AP_FETtecOneWire fetteconwire;
 #endif  // AP_FETTEC_ONEWIRE_ENABLED
+
+#if AP_CASTLELINK_ENABLED
+    AP_CastleLink castlelink;
+#endif
 
     // mask of disabled channels
     static uint32_t disabled_mask;

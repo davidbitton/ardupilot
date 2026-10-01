@@ -81,7 +81,7 @@ const AP_Param::GroupInfo AP_Terrain::var_info[] = {
     // @Param: CACHE_SZ
     // @DisplayName: Terrain cache size
     // @Description: The number of 32x28 cache blocks to keep in memory. Each block uses about 1800 bytes of memory
-    // @Range: 1 128
+    // @Range: 0 128
     // @User: Advanced
     AP_GROUPINFO("CACHE_SZ",  5, AP_Terrain, config_cache_size, TERRAIN_GRID_BLOCK_CACHE_SIZE),
 
@@ -114,7 +114,7 @@ AP_Terrain::AP_Terrain() :
  */
 bool AP_Terrain::height_amsl(const Location &loc, float &height, bool corrected)
 {
-    if (!active()) {
+    if (!allocate()) {
         return false;
     }
 
@@ -250,7 +250,7 @@ bool AP_Terrain::height_above_terrain(float &terrain_altitude, bool extrapolate)
 
     float theight_loc;
     if (!height_amsl(current_loc, theight_loc)) {
-        if (!extrapolate || !have_current_loc_height) {
+        if (!extrapolate) {
             return false;
         }
         // we don't have data at the current location, but the caller
@@ -317,7 +317,7 @@ bool AP_Terrain::height_relative_home_equivalent(float terrain_altitude,
 */
 float AP_Terrain::lookahead(float bearing, float distance, float climb_ratio)
 {
-    if (!active() || grid_spacing <= 0) {
+    if (!allocate() || grid_spacing <= 0) {
         return 0;
     }
 
@@ -361,11 +361,6 @@ float AP_Terrain::lookahead(float bearing, float distance, float climb_ratio)
 void AP_Terrain::update(void)
 {
     if (!enable) { return; }
-
-    if (cache == nullptr && !memory_alloc_failed) {
-        allocate();
-    }
-
     // just schedule any needed disk IO
     schedule_disk_io();
 
@@ -403,7 +398,7 @@ void AP_Terrain::update(void)
     }
 
     // update capabilities and status
-    if (active()) {
+    if (allocate()) {
         if (!pos_valid) {
             // we don't know where we are
             system_status = TerrainStatusUnhealthy;
@@ -470,7 +465,7 @@ bool AP_Terrain::pre_arm_checks(char *failure_msg, uint8_t failure_msg_len) cons
 #if HAL_LOGGING_ENABLED
 void AP_Terrain::log_terrain_data()
 {
-    if (!active()) {
+    if (!allocate()) {
         return;
     }
     Location loc;
@@ -507,30 +502,22 @@ void AP_Terrain::log_terrain_data()
   allocate terrain cache. Making this dynamically allocated allows
   memory to be saved when terrain functionality is disabled
  */
-void AP_Terrain::allocate(void)
+bool AP_Terrain::allocate(void)
 {
-    struct grid_cache *next = nullptr;
-    int cache_size = config_cache_size;
-    for (auto i=0; i<cache_size; i++) {
-        struct grid_cache *head = (struct grid_cache *)calloc(1, sizeof(struct grid_cache));
-        if (head == nullptr) {
-            memory_alloc_failed = true;
-            break;
-        }
-        head->next = next;
-        next = head;
+    if (enable == 0 || memory_alloc_failed) {
+        return false;
     }
-    if (memory_alloc_failed || !next) { // fail if error or we never tried to allocate anything
+    if (cache != nullptr) {
+        return true;
+    }
+    cache = (struct grid_cache *)calloc(config_cache_size, sizeof(cache[0]));
+    if (cache == nullptr) {
         GCS_SEND_TEXT(MAV_SEVERITY_CRITICAL, "Terrain: Allocation failed");
-        while (next != nullptr) { // don't leak what we already allocated
-            struct grid_cache *head = next;
-            next = head->next;
-            free(head);
-        }
         memory_alloc_failed = true;
-    } else { // success! make available for use
-        cache = next;
+        return false;
     }
+    cache_size = config_cache_size;
+    return true;
 }
 
 /*

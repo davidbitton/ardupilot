@@ -15,15 +15,8 @@
  */
 #pragma once
 
-#include <hal.h>
-
-namespace AP_HAL {
-class SPIDevice;
-}
+#include <stdbool.h>
 
 bool sdcard_init();
-bool sdcard_init_raw(uint8_t slowdown, uint8_t tries);
-BaseBlockDevice *sdcard_get_block_device();
 void sdcard_stop();
 bool sdcard_retry();
-AP_HAL::SPIDevice *sdcard_get_spi_device();

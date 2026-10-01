@@ -578,4 +578,4 @@ bool AP_Tramp::init(void)
     return false;
 }
 
-#endif // AP_TRAMP_ENABLED
+#endif // VTX_TRAMP

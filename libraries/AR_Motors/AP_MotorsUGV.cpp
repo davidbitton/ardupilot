@@ -962,10 +962,7 @@ void AP_MotorsUGV::output_omni(bool armed, float steering, float throttle, float
         const float scaled_steering = steering / 4500.0f;
         const float scaled_lateral = lateral * 0.01f;
 
-        // sized to the maximum rather than the runtime motor count: a
-        // variable-length array is non-standard C++, and setup_omni() only
-        // ever sets _motors_num to 3 or 4
-        float thr_str_ltr_out[AP_MOTORS_NUM_MOTORS_MAX] {};
+        float thr_str_ltr_out[_motors_num];
         float thr_str_ltr_max = 1;
         for (uint8_t i=0; i<_motors_num; i++) {
             // Each motor outputs throttle + steering + lateral

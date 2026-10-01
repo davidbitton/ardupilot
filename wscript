@@ -113,17 +113,15 @@ def add_build_options(g):
                      help=disable_description)
 
         # also add entirely-lower-case equivalents with underscores
-        # replaced with dashes, unless the option is already defined
-        # explicitly: the parser resolves conflicts by replacing the
-        # existing option, which would hide its help text:
+        # replaced with dashes::
         lower_enable_option = enable_option.lower().replace("_", "-")
-        if lower_enable_option != enable_option and not g.has_option(lower_enable_option):
+        if lower_enable_option != enable_option:
             g.add_option(lower_enable_option,
                          action='store_true',
                          default=False,
                          help=optparse.SUPPRESS_HELP)
         lower_disable_option = disable_option.lower().replace("_", "-")
-        if lower_disable_option != disable_option and not g.has_option(lower_disable_option):
+        if lower_disable_option != disable_option:
             g.add_option(lower_disable_option,
                          action='store_true',
                          default=False,
@@ -292,6 +290,10 @@ submodules at specific revisions.
     g.add_option('--enable-check-firmware', action='store_true',
                  default=False,
                  help="Enables firmware ID checking on boot")
+
+    g.add_option('--enable-custom-controller', action='store_true',
+                 default=False,
+                 help="Enables custom controller")
 
     g.add_option('--enable-gps-logging', action='store_true',
                  default=False,
@@ -628,7 +630,6 @@ def configure(cfg):
         else:
             cfg.end_msg('disabled', color='YELLOW')
 
-    cfg.get_board().configure_coverage(cfg)
     cfg.start_msg('Coverage build')
     if cfg.env.COVERAGE:
         cfg.end_msg('enabled')

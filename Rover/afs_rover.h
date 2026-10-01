@@ -43,4 +43,4 @@ protected:
     void set_mode_auto(void) override;
 };
 
-#endif  // AP_ROVER_ADVANCED_FAILSAFE_ENABLED
+#endif  // ADVANCED_FAILSAFE

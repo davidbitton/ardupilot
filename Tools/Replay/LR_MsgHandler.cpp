@@ -5,11 +5,10 @@
 #include <AP_DAL/AP_DAL.h>
 
 #include <cinttypes>
-#include <cstddef>
 
 extern const AP_HAL::HAL& hal;
 
-#define MSG_CREATE(sname,msgbytes) log_ ##sname msg; memcpy((void*)&msg, (msgbytes)+3, offsetof(log_ ##sname, _end));
+#define MSG_CREATE(sname,msgbytes) log_ ##sname msg; memcpy((void*)&msg, (msgbytes)+3, sizeof(msg));
 
 LR_MsgHandler::LR_MsgHandler(struct log_Format &_f) :
     MsgHandler(_f) {
@@ -240,14 +239,6 @@ void LR_MsgHandler_RGPJ::process_message(uint8_t *msgbytes)
     MSG_CREATE(RGPJ, msgbytes);
     AP::dal().handle_message(msg);
 }
-
-#if AP_DAL_RGPK_LOGGING_ENABLED
-void LR_MsgHandler_RGPK::process_message(uint8_t *msgbytes)
-{
-    MSG_CREATE(RGPK, msgbytes);
-    AP::dal().handle_message(msg);
-}
-#endif
 
 void LR_MsgHandler_RMGH::process_message(uint8_t *msgbytes)
 {

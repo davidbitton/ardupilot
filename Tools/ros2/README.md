@@ -38,10 +38,9 @@ ArduPilot `AP_DDS` client library.
 
 ## Prerequisites
 
-The packages depend on either ROS 2 Humble or ROS2 Jazzy:
+The packages depend on:
 
 - [ROS 2 Humble](https://docs.ros.org/en/humble/Installation/Ubuntu-Install-Debians.html)
-- [ROS 2 Jazzy](https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debians.html)
 
 ## Install Ubuntu
 
@@ -51,11 +50,9 @@ The packages depend on either ROS 2 Humble or ROS2 Jazzy:
 mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
 ```
 
-The ROS 2 tutorials contain more details regarding [ROS 2 workspaces](https://docs.ros.org/en/jazzy/Tutorials/Workspace/Creating-A-Workspace.html).
+The ROS 2 tutorials contain more details regarding [ROS 2 workspaces](https://docs.ros.org/en/humble/Tutorials/Workspace/Creating-A-Workspace.html).
 
 ### 2. Get the `ros2.repos` file
-
-### ROS 2 Humble repos
 
 ```bash
 cd ~/ros2_ws/src
@@ -63,43 +60,28 @@ wget https://raw.githubusercontent.com/ArduPilot/ardupilot/master/Tools/ros2/ros
 vcs import --recursive < ros2.repos
 ```
 
-### ROS 2 Jazzy repos
-
-```bash
-cd ~/ros2_ws/src
-wget https://raw.githubusercontent.com/ArduPilot/ardupilot/master/Tools/ros2/ros2.jazzy.repos
-vcs import --recursive < ros2.jazzy.repos
-```
-
 ### 3. Update dependencies
-
-### ROS 2 Humble dependencies
 
 ```bash
 cd ~/ros2_ws
 source /opt/ros/humble/setup.bash
 sudo apt update
 rosdep update
-rosdep install --rosdistro ${ROS_DISTRO} --from-paths src --ignore-src --skip-keys microxrcedds_agent
-```
-
-### ROS 2 Jazzy dependencies
-
-```bash
-cd ~/ros2_ws
-source /opt/ros/jazzy/setup.bash
-sudo apt update
-rosdep update
-rosdep install --rosdistro ${ROS_DISTRO} --from-paths src --ignore-src --skip-keys microxrcedds_agent
+rosdep install --rosdistro ${ROS_DISTRO} --from-paths src
 ```
 
 ### 4. Build
 
-Check that the [ROS environment](https://docs.ros.org/en/jazzy/Tutorials/Beginner-CLI-Tools/Configuring-ROS2-Environment.html#check-environment-variables) is configured correctly:
+Check that the [ROS environment](https://docs.ros.org/en/humble/Tutorials/Beginner-CLI-Tools/Configuring-ROS2-Environment.html#check-environment-variables) is configured correctly:
+
+```bash
+ROS_VERSION=2
+ROS_PYTHON_VERSION=3
+ROS_DISTRO=humble
+```
 
 ```bash
 cd ~/ros2_ws
-source ./install/setup.bash
 colcon build --cmake-args -DBUILD_TESTING=ON
 ```
 
@@ -226,7 +208,7 @@ ros2 run micro_ros_agent micro_ros_agent serial --baudrate 115200 --dev ./dev/tt
 ```
 
 ```bash
-arducopter --wipe --model quad --speedup 1 --slave 0 --instance 0 --serial1 uart:./dev/ttyROS1 --defaults $(ros2 pkg prefix ardupilot_sitl)/share/ardupilot_sitl/config/default_params/copter.parm,$(ros2 pkg prefix ardupilot_sitl)/share/ardupilot_sitl/config/default_params/dds_serial.parm --sim-address 127.0.0.1
+arducopter --synthetic-clock --wipe --model quad --speedup 1 --slave 0 --instance 0 --serial1 uart:./dev/ttyROS1 --defaults $(ros2 pkg prefix ardupilot_sitl)/share/ardupilot_sitl/config/default_params/copter.parm,$(ros2 pkg prefix ardupilot_sitl)/share/ardupilot_sitl/config/default_params/dds_serial.parm --sim-address 127.0.0.1
 ```
 
 ```bash

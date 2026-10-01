@@ -24,9 +24,8 @@ class AP_MSP_Telem_DisplayPort : public AP_MSP_Telem_Backend
 {
     using AP_MSP_Telem_Backend::AP_MSP_Telem_Backend;
 public:
-    bool is_scheduler_enabled() const override;
+    bool is_scheduler_enabled() const override { return false; }
     bool use_msp_thread() const override { return false; }
-    bool is_packet_ready(uint8_t idx, bool queue_empty) override;
     bool init_uart() override;
     AP_SerialManager::SerialProtocol get_serial_protocol() const override { return AP_SerialManager::SerialProtocol::SerialProtocol_MSP_DisplayPort; };
 

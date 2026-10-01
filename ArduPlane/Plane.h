@@ -116,11 +116,6 @@
 #include <AP_Scripting/AP_Scripting.h>
 #endif
 
-#include <AP_CustomControl/AP_CustomControl_config.h>
-#if AP_PLANE_CUSTOMCONTROL_ENABLED
-#include <AP_CustomControl/AP_CustomControl.h>                  // Custom control library
-#endif // AP_PLANE_CUSTOMCONTROL_ENABLED
-
 #include "RC_Channel_Plane.h"     // RC Channel Library
 #include "Parameters.h"
 #if AP_ADSB_AVOIDANCE_ENABLED
@@ -251,10 +246,6 @@ private:
     AP_PitchController pitchController{aparm};
     AP_YawController yawController{aparm};
     AP_SteerController steerController{};
-
-#if AP_PLANE_CUSTOMCONTROL_ENABLED
-    AP_CustomControl custom_control{aparm};
-#endif // AP_PLANE_CUSTOMCONTROL_ENABLED
 
     // Training mode
     bool training_manual_roll;  // user has manual roll control
@@ -919,7 +910,6 @@ private:
     int32_t adjusted_altitude_cm(void);
     int32_t adjusted_relative_altitude_cm(void);
     float mission_alt_offset(void);
-    void reset_alt_offset(bool force = false);
     float height_above_target(void);
     float lookahead_adjustment(void);
     void fix_terrain_WP(Location &loc, uint32_t linenum);
@@ -944,13 +934,6 @@ private:
     int16_t calc_nav_yaw_coordinated();
     int16_t calc_nav_yaw_course(void);
     int16_t calc_nav_yaw_ground(void);
-
-    // Check if there has been a change in attitude estimate which the attitude controllers should be told about
-    void check_ahrs_reset();
-    struct {
-        uint16_t ahrs_yaw_reset_count;
-        uint16_t attitude_reset_count;
-    } ahrs_check;
 
 #if HAL_LOGGING_ENABLED
 
@@ -1091,7 +1074,7 @@ private:
     // Plane.cpp
     void disarm_if_autoland_complete();
     bool trigger_land_abort(const float climb_to_alt_m);
-    void get_osd_attitude_rad(float &roll, float &pitch, float &yaw) override;
+    void get_osd_roll_pitch_rad(float &roll, float &pitch) const override;
     float tecs_hgt_afe(void);
     void get_scheduler_tasks(const AP_Scheduler::Task *&tasks,
                              uint8_t &task_count,
@@ -1151,9 +1134,9 @@ private:
 
     // system.cpp
     __INITFUNC__ void init_ardupilot() override;
-    bool set_mode(Mode& new_mode, const ModeReason reason) WARN_IF_UNUSED;
-    bool set_mode(const uint8_t mode, const ModeReason reason) override WARN_IF_UNUSED;
-    bool set_mode_by_number(const Mode::Number new_mode_number, const ModeReason reason) WARN_IF_UNUSED;
+    bool set_mode(Mode& new_mode, const ModeReason reason);
+    bool set_mode(const uint8_t mode, const ModeReason reason) override;
+    bool set_mode_by_number(const Mode::Number new_mode_number, const ModeReason reason);
     void check_long_failsafe();
     void check_short_rc_failsafe();
     void startup_INS(void);
@@ -1176,10 +1159,6 @@ private:
     bool check_takeoff_timeout(void);
     bool check_takeoff_timeout_level_off(void);
 
-#if AP_PLANE_CUSTOMCONTROL_ENABLED
-    void run_custom_controller();
-#endif // AP_PLANE_CUSTOMCONTROL_ENABLED
-
     // avoidance_adsb.cpp
     void avoidance_adsb_update(void);
 
@@ -1188,7 +1167,6 @@ private:
     float apply_throttle_limits(float throttle_in);
     void set_throttle(void);
     void set_takeoff_expected(void);
-    float get_auto_flap_speed() const;
     void set_servos_flaps(void);
     void dspoiler_update(void);
     void airbrake_update(void);

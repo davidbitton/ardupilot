@@ -2,46 +2,40 @@ name: QURT Build
 
 on:
   push:
-    branches: ['**']  # excludes tag pushes
     paths-ignore:
-      - 'Tools/renode/**'
       # remove other vehicles
       - 'AntennaTracker/**'
       - 'Blimp/**'
       # remove non SITL HAL
       - 'libraries/AP_HAL_ChibiOS/**'
       - 'libraries/AP_HAL_ESP32/**'
-      - 'libraries/AP_HAL_Linux/**'
-      - 'libraries/AP_HAL_SITL/**'
-      - 'libraries/SITL/**'
+      - 'libraries/AP_HAL_QURT/**'
       # remove non SITL directories
       - 'Tools/AP_Bootloader/**'
       - 'Tools/AP_Periph/**'
-      - 'Tools/bootloaders/**'
-      - 'Tools/cameras_gimbals/**'
-      - 'Tools/CHDK-Scripts/**'
-      - 'Tools/CodeStyle/**'
-      - 'Tools/completion/**'
+      - 'Tools/CHDK-Script/**'
       - 'Tools/CPUInfo/**'
-      - 'Tools/debug/**'
-      - 'Tools/environment_install/**'
+      - 'Tools/CodeStyle/**'
       - 'Tools/FilterTestTool/**'
       - 'Tools/Frame_params/**'
-      - 'Tools/geotag/**'
       - 'Tools/GIT_Test/**'
-      - 'Tools/gittools/**'
       - 'Tools/Hello/**'
       - 'Tools/IO_Firmware/**'
       - 'Tools/Linux_HAL_Essentials/**'
-      - 'Tools/mavproxy_modules/**'
       - 'Tools/Pozyx/**'
       - 'Tools/PrintVersion.py'
       - 'Tools/Replay/**'
-      - 'Tools/simulink/**'
-      - 'Tools/terrain-tools/**'
       - 'Tools/UDP_Proxy/**'
-      - 'Tools/vagrant/**'
       - 'Tools/Vicon/**'
+      - 'Tools/bootloaders/**'
+      - 'Tools/completion/**'
+      - 'Tools/debug/**'
+      - 'Tools/environment_install/**'
+      - 'Tools/geotag/**'
+      - 'Tools/gittools/**'
+      - 'Tools/mavproxy_modules/**'
+      - 'Tools/simulink/**'
+      - 'Tools/vagrant/**'
       # Discard python file from Tools/scripts as not used
       - 'Tools/scripts/**.py'
       - 'Tools/scripts/build_sizes/**'
@@ -58,8 +52,10 @@ on:
       - '.editorconfig'
       - '.flake8'
       - '.gitattributes'
+      - '.github'
       - '.gitignore'
       - '.pre-commit-config.yaml'
+      - '.pydevproject'
       - '.valgrind-suppressions'
       - '.valgrindrc'
       - 'Dockerfile'
@@ -67,28 +63,25 @@ on:
       - 'Makefile'
       # Remove some directories check
       - '.vscode/**'
+      - '.github/ISSUE_TEMPLATE/**'
       # Remove change on other workflows
       - '.github/**'
       - '!.github/workflows/qurt_build.yml'  # except this one
 
   pull_request:
     paths-ignore:
-      - 'Tools/renode/**'
       # remove other vehicles
       - 'AntennaTracker/**'
       - 'Blimp/**'
       # remove non SITL HAL
       - 'libraries/AP_HAL_ChibiOS/**'
       - 'libraries/AP_HAL_ESP32/**'
-      - 'libraries/AP_HAL_Linux/**'
-      - 'libraries/AP_HAL_SITL/**'
-      - 'libraries/SITL/**'
+      - 'libraries/AP_HAL_QURT/**'
       # remove non SITL directories
       - 'Tools/AP_Bootloader/**'
       - 'Tools/AP_Periph/**'
       - 'Tools/bootloaders/**'
-      - 'Tools/cameras_gimbals/**'
-      - 'Tools/CHDK-Scripts/**'
+      - 'Tools/CHDK-Script/**'
       - 'Tools/CodeStyle/**'
       - 'Tools/completion/**'
       - 'Tools/CPUInfo/**'
@@ -102,12 +95,12 @@ on:
       - 'Tools/Hello/**'
       - 'Tools/IO_Firmware/**'
       - 'Tools/Linux_HAL_Essentials/**'
+      - 'Tools/LogAnalyzer/**'
       - 'Tools/mavproxy_modules/**'
       - 'Tools/Pozyx/**'
       - 'Tools/PrintVersion.py'
       - 'Tools/Replay/**'
       - 'Tools/simulink/**'
-      - 'Tools/terrain-tools/**'
       - 'Tools/UDP_Proxy/**'
       - 'Tools/vagrant/**'
       - 'Tools/Vicon/**'
@@ -127,8 +120,10 @@ on:
       - '.editorconfig'
       - '.flake8'
       - '.gitattributes'
+      - '.github'
       - '.gitignore'
       - '.pre-commit-config.yaml'
+      - '.pydevproject'
       - '.valgrind-suppressions'
       - '.valgrindrc'
       - 'Dockerfile'
@@ -136,6 +131,7 @@ on:
       - 'Makefile'
       # Remove some directories check
       - '.vscode/**'
+      - '.github/ISSUE_TEMPLATE/**'
       # Remove change on other workflows
       - '.github/**'
       - '!.github/workflows/qurt_build.yml'  # except this one
@@ -146,15 +142,12 @@ concurrency:
   group: ci-${{github.workflow}}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-
 jobs:
   build:
     if: github.repository == 'ArduPilot/ardupilot'
     runs-on: 'ardupilot-qurt'
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v6
         with:
           submodules: 'recursive'
 
@@ -183,10 +176,5 @@ jobs:
             build/ModalAI-VOXL2/ArduPilot_Plane.so
             build/ModalAI-VOXL2/ArduPilot_Rover.so
             build/ModalAI-VOXL2/ArduPilot.so
-            build/ModalAI-VOXL3/ardupilot
-            build/ModalAI-VOXL3/ArduPilot_Copter.so
-            build/ModalAI-VOXL3/ArduPilot_Plane.so
-            build/ModalAI-VOXL3/ArduPilot_Rover.so
-            build/ModalAI-VOXL3/ArduPilot.so
             libraries/AP_HAL_QURT/packaging/*.deb
           retention-days: 7

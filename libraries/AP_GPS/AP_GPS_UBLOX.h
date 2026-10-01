@@ -744,8 +744,7 @@ private:
     };
 
 #if AP_GPS_UBLOX_CFGV2_ENABLED
-    #define UBLOX_GNSS_TYPE_ASSERT(NAME, INDEX) \
-        static_assert(AP_GPS_UBLOX::GNSS_##NAME == INDEX, "GNSS_" #NAME " has incorrect index");
+    #define UBLOX_GNSS_TYPE_ASSERT(NAME, INDEX) static_assert(AP_GPS_UBLOX::GNSS_##NAME == INDEX);
     UBLOX_GNSS(UBLOX_GNSS_TYPE_ASSERT)
     #undef UBLOX_GNSS_TYPE_ASSERT
 #endif

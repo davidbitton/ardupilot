@@ -196,3 +196,4 @@ void stm32_disable_cm4_core(void);
 #ifdef __cplusplus
 }
 #endif
+

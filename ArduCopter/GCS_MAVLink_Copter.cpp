@@ -324,7 +324,6 @@ bool GCS_MAVLINK_Copter::try_send_message(enum ap_message id)
 }
 
 
-#if MODE_AUTO_ENABLED
 MISSION_STATE GCS_MAVLINK_Copter::mission_state(const class AP_Mission &mission) const
 {
     if (copter.mode_auto.paused()) {
@@ -332,7 +331,6 @@ MISSION_STATE GCS_MAVLINK_Copter::mission_state(const class AP_Mission &mission)
     }
     return GCS_MAVLINK::mission_state(mission);
 }
-#endif  // MODE_AUTO_ENABLED
 
 bool GCS_MAVLINK_Copter::handle_guided_request(AP_Mission::Mission_Command &cmd)
 {
@@ -599,14 +597,14 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_MAV_CMD_NAV_TAKEOFF(const mavlink_command_
 }
 
 #if AP_MAVLINK_COMMAND_LONG_ENABLED
-bool GCS_MAVLINK_Copter::command_int_only(MAV_CMD command) const
+bool GCS_MAVLINK_Copter::mav_frame_for_command_long(MAV_FRAME &frame, MAV_CMD packet_command) const
 {
-    switch (command) {
-    case MAV_CMD_NAV_VTOL_TAKEOFF:
+    if (packet_command == MAV_CMD_NAV_TAKEOFF ||
+        packet_command == MAV_CMD_NAV_VTOL_TAKEOFF) {
+        frame = MAV_FRAME_GLOBAL_RELATIVE_ALT;
         return true;
-    default:
-        return false;
     }
+    return GCS_MAVLINK::mav_frame_for_command_long(frame, packet_command);
 }
 #endif
 
@@ -1264,10 +1262,7 @@ void GCS_MAVLINK_Copter::send_wind() const
         // valid wind estimate on copters
         return;
     }
-    Vector3f wind;
-    // send the estimate even if it is not marked valid, to preserve
-    // existing behaviour
-    IGNORE_RETURN(AP::ahrs().get_wind(wind));
+    const Vector3f wind = AP::ahrs().wind_estimate();
     mavlink_msg_wind_send(
         chan,
         degrees(atan2f(-wind.y, -wind.x)),
@@ -1325,9 +1320,7 @@ uint8_t GCS_MAVLINK_Copter::high_latency_wind_speed() const
     Vector3f wind;
     // return units are m/s*5
     if (AP::ahrs().airspeed_vector_TAS(airspeed_vec_bf)) {
-        // use the estimate even if it is not marked valid, to preserve
-        // existing behaviour
-        IGNORE_RETURN(AP::ahrs().get_wind(wind));
+        wind = AP::ahrs().wind_estimate();
         return wind.xy().length() * 5;
     }
     return 0; 
@@ -1339,9 +1332,7 @@ uint8_t GCS_MAVLINK_Copter::high_latency_wind_direction() const
     Vector3f wind;
     // return units are deg/2
     if (AP::ahrs().airspeed_vector_TAS(airspeed_vec_bf)) {
-        // use the estimate even if it is not marked valid, to preserve
-        // existing behaviour
-        IGNORE_RETURN(AP::ahrs().get_wind(wind));
+        wind = AP::ahrs().wind_estimate();
         // need to convert -180->180 to 0->360/2
         return wrap_360(degrees(atan2f(-wind.y, -wind.x))) / 2;
     }
@@ -1362,9 +1353,7 @@ uint8_t GCS_MAVLINK_Copter::send_available_mode(uint8_t index) const
         &copter.mode_acro,
 #endif
         &copter.mode_stabilize,
-#if MODE_ALTHOLD_ENABLED
         &copter.mode_althold,
-#endif
 #if MODE_CIRCLE_ENABLED
         &copter.mode_circle,
 #endif

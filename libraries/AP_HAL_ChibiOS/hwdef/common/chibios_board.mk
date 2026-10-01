@@ -148,6 +148,13 @@ endif
 
 #	   $(TESTSRC) \
 #	   test.c
+ifneq ($(CRASHCATCHER),)
+LIBCC_CSRC = $(CRASHCATCHER)/Core/src/CrashCatcher.c \
+             $(HWDEF)/common/crashdump.c
+
+LIBCC_ASMXSRC = $(CRASHCATCHER)/Core/src/CrashCatcher_armv7m.S
+endif
+
 # C++ sources that can be compiled in ARM or THUMB mode depending on the global
 # setting.
 CPPSRC = $(sort $(ALLCPPSRC))
@@ -176,15 +183,11 @@ TCPPSRC =
 ASMSRC = $(ALLASMSRC)
 ASMXSRC = $(ALLXASMSRC)
 
-ifeq ($(ENABLE_CRASHDUMP),yes)
-CRASHCATCHER_ASMXSRC = $(HWDEF)/common/CrashCatcher_armv7m_asm.S
-endif
-
 INCDIR = $(CHIBIOS)/os/license \
          $(ALLINC) $(HWDEF)/common
 
-ifeq ($(ENABLE_CRASHDUMP),yes)
-INCDIR += $(AP_HAL)
+ifneq ($(CRASHCATCHER),)
+INCDIR += $(CRASHCATCHER)/include
 endif
 
 ifeq ($(USE_USB_MSD),yes)
@@ -279,9 +282,3 @@ ULIBS =
 # End of user defines
 ##############################################################################
 include $(HWDEF)/common/chibios_common.mk
-
-# ChibiOS intentionally fills the fixed-width USB MSD serial-number field
-# without a trailing NUL. Limit the warning suppression to that source file.
-ifeq ($(USE_USB_MSD),yes)
-$(OBJDIR)/hal_usb_msd.o: CWARN += -Wno-unterminated-string-initialization
-endif

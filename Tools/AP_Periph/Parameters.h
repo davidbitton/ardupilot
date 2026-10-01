@@ -105,7 +105,6 @@ public:
         k_param_battery_tag,
         k_param_servo_command_timeout_ms,
         k_param_servo_telem_msg_rate,
-        k_param_battery_bms,
     };
 
     AP_Int16 format_version;

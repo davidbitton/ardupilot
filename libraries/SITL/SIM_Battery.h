@@ -28,9 +28,7 @@ public:
     void setup(float _capacity_Ah, float _resistance_ohm, float _max_voltage, float _ambient_temperature_degC);
 
     // Resets the battery state if the configuration (e.g. from SIM_BATT_* parameters) has changed.
-    // Changing desired_resistance_ohm does not cause a state reset.
-    // A negative desired_resistance value means to leave the existing resistance unchanged.
-    void maybe_reset(float desired_voltage, float desired_capacity_Ah, float desired_resistance_ohm = -1.0f);
+    void maybe_reset(float desired_voltage, float desired_capacity_Ah);
 
     // Call this periodically to "step" the battery forward in time
     void consume_energy(float attempted_current_amp, uint64_t now_us);

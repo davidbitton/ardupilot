@@ -28,8 +28,6 @@ class AP_InertialSensor_LSM6DSV : public AP_InertialSensor_Backend {
 public:
     enum class LSM6DSV_Type : uint8_t {
         LSM6DSV16X,
-        LSM6DSV32X,
-        LSM6DSK320X,
     };
 
     static AP_InertialSensor_Backend *probe(AP_InertialSensor &imu,
@@ -113,7 +111,6 @@ private:
     float _gyro_scale;
     uint8_t _whoami;
     uint32_t _temperature_last_ms;
-    float _temperature_degc = 25.0f;
     uint16_t _backend_rate_hz;
     uint32_t _backend_period_us;
     bool _fast_sampling = false;

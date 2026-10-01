@@ -318,4 +318,4 @@ uint8_t Rover::get_num_log_structures() const
     return ARRAY_SIZE(log_structure);
 }
 
-#endif  // HAL_LOGGING_ENABLED
+#endif  // LOGGING_ENABLED

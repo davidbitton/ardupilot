@@ -25,13 +25,13 @@ using namespace HALSITL;
 #define PASCAL_TO_VOLTS(_p) (_p/VOLTS_TO_PASCAL)
 
 /*
-  convert equivalent airspeed (EAS) in m/s to an airspeed sensor value
+  convert airspeed in m/s to an airspeed sensor value
  */
-void SITL_State::_update_airspeed(float eas)
+void SITL_State::_update_airspeed(float true_airspeed)
 {
     for (uint8_t i=0; i<AIRSPEED_MAX_SENSORS; i++) {
         const auto &arspd = _sitl->airspeed[i];
-        float airspeed = eas;
+        float airspeed = true_airspeed / AP_Baro::get_EAS2TAS_for_alt_amsl(_sitl->state.altitude);
         const float diff_pressure = sq(airspeed) / arspd.ratio;
         float airspeed_raw;
     

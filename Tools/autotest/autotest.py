@@ -164,19 +164,7 @@ def run_clang_scan_build():
         print("Failed scan-build-clean")
         return False
 
-    # directories we never want in the reports: git submodules, vendored
-    # third-party code and machine-generated sources.  --exclude keeps them
-    # out of the browsable HTML; process_scan_build_output.py filters the
-    # same list (EXCLUDE_DIRS) out of the plists, which is what the ratchet
-    # counts.
-    from scan_build_suppressions import EXCLUDE_DIRS
-    exclude_args = ' '.join(
-        '--exclude %s' % util.reltopdir(d.rstrip('/')) for d in EXCLUDE_DIRS
-    )
-    # -plist-html emits both the browsable HTML reports and .plist files;
-    # the .plist files carry issue_hash_content_of_line_in_context, a
-    # line-number-independent hash used to match the suppressions list.
-    if util.run_cmd("scan-build -plist-html %s python3 waf build" % exclude_args,
+    if util.run_cmd("scan-build python3 waf build",
                     directory=util.reltopdir('.')) != 0:
         print("Failed scan-build-build")
         return False
@@ -285,8 +273,6 @@ __bin_names = {
 
     "CopterTests2a": "arducopter",
     "CopterTests2b": "arducopter",
-    "CopterTests2c": "arducopter",
-    "CopterTests2d": "arducopter",
 
     "Plane": "arduplane",
     "PlaneTests1a": "arduplane",
@@ -297,9 +283,6 @@ __bin_names = {
     "Tracker": "antennatracker",
     "Helicopter": "arducopter-heli",
     "QuadPlane": "arduplane",
-    "QuadPlaneTests1a": "arduplane",
-    "QuadPlaneTests1b": "arduplane",
-    "QuadPlaneTests1c": "arduplane",
     "Sub": "ardusub",
     "Blimp": "blimp",
     "BalanceBot": "ardurover",
@@ -362,23 +345,18 @@ def find_specific_test_to_run(step):
 tester_class_map = {
     "test.Blimp": blimp.AutoTestBlimp,
     "test.Copter": arducopter.AutoTestCopter,
-    "test.CopterTests1a": arducopter.AutoTestCopterTests1a, # ~14m on CI
-    "test.CopterTests1b": arducopter.AutoTestCopterTests1b, # ~15m on CI
-    "test.CopterTests1c": arducopter.AutoTestCopterTests1c, # ~14m on CI
-    "test.CopterTests1d": arducopter.AutoTestCopterTests1d, # ~14m on CI
-    "test.CopterTests1e": arducopter.AutoTestCopterTests1e, # ~14m on CI
-    "test.CopterTests2a": arducopter.AutoTestCopterTests2a, # ~14m on CI
-    "test.CopterTests2b": arducopter.AutoTestCopterTests2b, # ~14m on CI
-    "test.CopterTests2c": arducopter.AutoTestCopterTests2c, # ~14m on CI
-    "test.CopterTests2d": arducopter.AutoTestCopterTests2d, # ~14m on CI
+    "test.CopterTests1a": arducopter.AutoTestCopterTests1a, # 8m43s
+    "test.CopterTests1b": arducopter.AutoTestCopterTests1b, # 8m5s
+    "test.CopterTests1c": arducopter.AutoTestCopterTests1c, # 5m17s
+    "test.CopterTests1d": arducopter.AutoTestCopterTests1d, # 8m20s
+    "test.CopterTests1e": arducopter.AutoTestCopterTests1e, # 8m32s
+    "test.CopterTests2a": arducopter.AutoTestCopterTests2a, # 8m23s
+    "test.CopterTests2b": arducopter.AutoTestCopterTests2b, # 8m18s
     "test.Plane": arduplane.AutoTestPlane,
-    "test.PlaneTests1a": arduplane.AutoTestPlaneTests1a, # ~12m on CI
-    "test.PlaneTests1b": arduplane.AutoTestPlaneTests1b, # ~12m on CI
-    "test.PlaneTests1c": arduplane.AutoTestPlaneTests1c, # ~12m on CI
+    "test.PlaneTests1a": arduplane.AutoTestPlaneTests1a,
+    "test.PlaneTests1b": arduplane.AutoTestPlaneTests1b,
+    "test.PlaneTests1c": arduplane.AutoTestPlaneTests1c,
     "test.QuadPlane": quadplane.AutoTestQuadPlane,
-    "test.QuadPlaneTests1a": quadplane.AutoTestQuadPlaneTests1a, # ~11m on CI
-    "test.QuadPlaneTests1b": quadplane.AutoTestQuadPlaneTests1b, # ~11m on CI
-    "test.QuadPlaneTests1c": quadplane.AutoTestQuadPlaneTests1c, # ~11m on CI
     "test.Rover": rover.AutoTestRover,
     "test.BalanceBot": balancebot.AutoTestBalanceBot,
     "test.Sailboat": sailboat.AutoTestSailboat,
@@ -522,9 +500,9 @@ def run_step(step):
                               "customisation" : customisation,
                               "param_file" : param_file}
                 supplementary_binaries.append(sup_binary)
-            # note that speedup is permitted here: the vehicle SITL is
-            # started with --sim-periph-lockstep so it cannot outrun
-            # the supplementary peripherals
+            # we are running in conjunction with a supplementary app
+            # can't have speedup
+            opts.speedup = 1.0
             break
 
     fly_opts = {
@@ -550,12 +528,10 @@ def run_step(step):
         "build_opts": copy.copy(build_opts),
         "generate_junit": opts.junit,
         "enable_fgview": opts.enable_fgview,
-        "unix_domain_socket": opts.unix_domain_socket,
     }
     if opts.speedup is not None:
         fly_opts["speedup"] = opts.speedup
 
-    fly_opts["check_parameter_leaks"] = opts.check_parameter_leaks
     fly_opts["move_logs_on_test_failure"] = opts.move_logs_on_test_failure
 
     # handle "test.Copter" etc:
@@ -859,15 +835,6 @@ if __name__ == "__main__":
     ''' main program '''
     os.environ['PYTHONUNBUFFERED'] = '1'
 
-    # pin SITL's multicast traffic (the simulation state a periph
-    # consumes, and multicast CAN) to the loopback interface.  By
-    # default it follows the routing table, which means it goes out
-    # whichever interface has the default route and stops working when
-    # that route is not up or is not multicast-capable; a test should
-    # not pass or fail on the state of the machine's network.  Every
-    # SITL we start inherits this.
-    os.environ.setdefault('SITL_MULTICAST_IF_ADDR', '127.0.0.1')
-
     if sys.platform != "darwin":
         os.putenv('TMPDIR', util.reltopdir('tmp'))
 
@@ -1018,19 +985,6 @@ if __name__ == "__main__":
                          default=None,
                          type='int',
                          help='speedup to run the simulations at')
-    group_sim.add_option("--check-parameter-leaks",
-                         action='store_true',
-                         dest='check_parameter_leaks',
-                         default=True,
-                         help='after each test, check no parameter the suite '
-                         'could not revert has been left changed; catches '
-                         'leaks into the tests which follow.  On by default')
-    group_sim.add_option("--no-check-parameter-leaks",
-                         action='store_false',
-                         dest='check_parameter_leaks',
-                         help='do not check for parameter leaks after each '
-                         'test.  The check downloads the full parameter set '
-                         'once per test')
     group_sim.add_option("--valgrind",
                          default=False,
                          action='store_true',
@@ -1079,10 +1033,6 @@ if __name__ == "__main__":
     group_sim.add_option("", "--replay",
                          action='store_true',
                          help="enable replay logging for tests")
-    group_sim.add_option("--unix-domain-socket", "--uds",
-                         action='store_true',
-                         default=False,
-                         help="use Unix domain sockets for SITL UARTs")
     parser.add_option_group(group_sim)
 
     group_completion = optparse.OptionGroup(parser, "Completion helpers")
@@ -1191,16 +1141,10 @@ if __name__ == "__main__":
 
         'test.CopterTests2a',
         'test.CopterTests2b',
-        'test.CopterTests2c',
-        'test.CopterTests2d',
 
         'test.PlaneTests1a',
         'test.PlaneTests1b',
         'test.PlaneTests1c',
-
-        'test.QuadPlaneTests1a',
-        'test.QuadPlaneTests1b',
-        'test.QuadPlaneTests1c',
 
         'clang-scan-build',
     ]
@@ -1232,8 +1176,6 @@ if __name__ == "__main__":
 
         "fly.ArduCopterTests2a": "test.CopterTests2a",
         "fly.ArduCopterTests2b": "test.CopterTests2b",
-        "fly.ArduCopterTests2c": "test.CopterTests2c",
-        "fly.ArduCopterTests2d": "test.CopterTests2d",
 
     }
 
@@ -1282,7 +1224,7 @@ if __name__ == "__main__":
 
     if lck is None:
         print("autotest is locked - exiting.  lckfile=(%s)" % (lckfile,))
-        sys.exit(1)
+        sys.exit(0)
 
     atexit.register(util.pexpect_close_all)
 

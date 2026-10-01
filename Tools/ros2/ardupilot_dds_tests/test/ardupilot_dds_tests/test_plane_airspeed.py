@@ -35,7 +35,6 @@ from launch_pytest.tools import process as process_tools
 from rclpy.qos import QoSHistoryPolicy
 from rclpy.qos import QoSProfile
 from rclpy.qos import QoSReliabilityPolicy
-from ros_helpers import ros_node
 
 TOPIC = "/ap/airspeed"
 WAIT_FOR_START_TIMEOUT = 5.0
@@ -59,6 +58,10 @@ class AirspeedTester(rclpy.node.Node):
         )
 
         self.subscription = self.create_subscription(Airspeed, TOPIC, self.airspeed_data_callback, qos_profile)
+
+        # Add a spin thread.
+        self.ros_spin_thread = threading.Thread(target=lambda node: rclpy.spin(node), args=(self,))
+        self.ros_spin_thread.start()
 
     def airspeed_data_callback(self, msg):
         """Process a airspeed message from the autopilot."""
@@ -146,10 +149,14 @@ def test_dds_serial_airspeed_msg_recv_copter(launch_context, launch_sitl_copter_
     process_tools.wait_for_start_sync(launch_context, mavproxy, timeout=WAIT_FOR_START_TIMEOUT)
     process_tools.wait_for_start_sync(launch_context, sitl, timeout=WAIT_FOR_START_TIMEOUT)
 
-    with ros_node(AirspeedTester) as node:
+    rclpy.init()
+    try:
+        node = AirspeedTester()
         node.start_subscriber()
         msgs_received_flag = node.msg_event_object.wait(timeout=AIRSPEED_RECV_TIMEOUT)
         assert msgs_received_flag, f"Did not receive '{TOPIC}' msgs."
+    finally:
+        rclpy.shutdown()
     yield
 
 
@@ -166,10 +173,15 @@ def test_dds_udp_airspeed_msg_recv_copter(launch_context, launch_sitl_copter_dds
     process_tools.wait_for_start_sync(launch_context, mavproxy, timeout=WAIT_FOR_START_TIMEOUT)
     process_tools.wait_for_start_sync(launch_context, sitl, timeout=WAIT_FOR_START_TIMEOUT)
 
-    with ros_node(AirspeedTester) as node:
+    rclpy.init()
+    try:
+        node = AirspeedTester()
         node.start_subscriber()
         msgs_received_flag = node.msg_event_object.wait(timeout=AIRSPEED_RECV_TIMEOUT)
         assert msgs_received_flag, f"Did not receive '{TOPIC}' msgs."
+
+    finally:
+        rclpy.shutdown()
     yield
 
 
@@ -188,10 +200,14 @@ def test_dds_serial_airspeed_msg_recv_plane(launch_context, launch_sitl_plane_dd
     process_tools.wait_for_start_sync(launch_context, mavproxy, timeout=WAIT_FOR_START_TIMEOUT)
     process_tools.wait_for_start_sync(launch_context, sitl, timeout=WAIT_FOR_START_TIMEOUT)
 
-    with ros_node(AirspeedTester) as node:
+    rclpy.init()
+    try:
+        node = AirspeedTester()
         node.start_subscriber()
         msgs_received_flag = node.msg_event_object.wait(timeout=AIRSPEED_RECV_TIMEOUT)
         assert msgs_received_flag, f"Did not receive '{TOPIC}' msgs."
+    finally:
+        rclpy.shutdown()
     yield
 
 
@@ -208,8 +224,13 @@ def test_dds_udp_airspeed_msg_recv_plane(launch_context, launch_sitl_plane_dds_u
     process_tools.wait_for_start_sync(launch_context, mavproxy, timeout=WAIT_FOR_START_TIMEOUT)
     process_tools.wait_for_start_sync(launch_context, sitl, timeout=WAIT_FOR_START_TIMEOUT)
 
-    with ros_node(AirspeedTester) as node:
+    rclpy.init()
+    try:
+        node = AirspeedTester()
         node.start_subscriber()
         msgs_received_flag = node.msg_event_object.wait(timeout=AIRSPEED_RECV_TIMEOUT)
         assert msgs_received_flag, f"Did not receive '{TOPIC}' msgs."
+
+    finally:
+        rclpy.shutdown()
     yield

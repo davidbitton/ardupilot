@@ -257,19 +257,11 @@ bool AP_Compass_AK8963::_reset()
 bool AP_Compass_AK8963::_calibrate()
 {
     /* Enable FUSE-mode in order to be able to read calibration data */
-    if (!_bus->register_write(AK8963_CNTL1, AK8963_FUSE_MODE | AK8963_16BIT_ADC)) {
-        // without fuse-ROM access mode the sensitivity adjustment
-        // registers do not hold the calibration data
-        return false;
-    }
+    _bus->register_write(AK8963_CNTL1, AK8963_FUSE_MODE | AK8963_16BIT_ADC);
 
     uint8_t response[3];
 
-    if (!_bus->block_read(AK8963_ASAX, response, 3)) {
-        // the sensitivity adjustment values were not read; response is
-        // undefined, so do not calibrate from it
-        return false;
-    }
+    _bus->block_read(AK8963_ASAX, response, 3);
 
     for (int i = 0; i < 3; i++) {
         float data = response[i];

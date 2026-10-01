@@ -142,47 +142,7 @@ const AP_Param::GroupInfo HarmonicNotchFilterParams::var_info[] = {
     // @Range: 0.1 1.0
     // @User: Advanced
     AP_GROUPINFO("FM_RAT", 9, HarmonicNotchFilterParams, _freq_min_ratio, 1.0),
-
-#if HAL_WITH_ESC_TELEM
-    // @Param: ESCMSK
-    // @DisplayName: Harmonic Notch Filter ESC mask
-    // @Description: Bitmask of ESC channels to use in ESC Telemetry mode. 0 uses all available ESCs.
-    // @Bitmask: 0:  ESC 1
-    // @Bitmask: 1:  ESC 2
-    // @Bitmask: 2:  ESC 3
-    // @Bitmask: 3:  ESC 4
-    // @Bitmask: 4:  ESC 5
-    // @Bitmask: 5:  ESC 6
-    // @Bitmask: 6:  ESC 7
-    // @Bitmask: 7:  ESC 8
-    // @Bitmask: 8:  ESC 9
-    // @Bitmask: 9:  ESC 10
-    // @Bitmask: 10: ESC 11
-    // @Bitmask: 11: ESC 12
-    // @Bitmask: 12: ESC 13
-    // @Bitmask: 13: ESC 14
-    // @Bitmask: 14: ESC 15
-    // @Bitmask: 15: ESC 16
-    // @Bitmask: 16: ESC 17
-    // @Bitmask: 17: ESC 18
-    // @Bitmask: 18: ESC 19
-    // @Bitmask: 19: ESC 20
-    // @Bitmask: 20: ESC 21
-    // @Bitmask: 21: ESC 22
-    // @Bitmask: 22: ESC 23
-    // @Bitmask: 23: ESC 24
-    // @Bitmask: 24: ESC 25
-    // @Bitmask: 25: ESC 26
-    // @Bitmask: 26: ESC 27
-    // @Bitmask: 27: ESC 28
-    // @Bitmask: 28: ESC 29
-    // @Bitmask: 29: ESC 30
-    // @Bitmask: 30: ESC 31
-    // @Bitmask: 31: ESC 32
-    // @User: Advanced
-    AP_GROUPINFO("ESCMSK", 10, HarmonicNotchFilterParams, _esc_mask, 0),
-#endif // HAL_WITH_ESC_TELEM
-
+    
     AP_GROUPEND
 };
 
@@ -245,32 +205,14 @@ void HarmonicNotchFilter<T>::init(float sample_freq_hz, HarmonicNotchFilterParam
 }
 
 /*
-  calculate the number of notch filters needed for the given config,
-  clamped to HAL_HNF_MAX_FILTERS and rounded down to a whole number of composite
-  groups so update() never writes past the end of the filter array
- */
-template <class T>
-uint16_t HarmonicNotchFilter<T>::notch_count(uint8_t num_sources, uint8_t num_harmonics, uint8_t composite_notches) const
-{
-    if (num_sources == 0 || num_harmonics == 0 || composite_notches == 0) {
-        return 0;
-    }
-
-    // This relies on integer division to round the result down
-    const uint16_t max_notches = HAL_HNF_MAX_FILTERS / composite_notches;
-    const uint16_t notches = MIN(num_sources * num_harmonics, max_notches);
-    return notches * composite_notches;
-}
-
-/*
   allocate a collection of, at most HAL_HNF_MAX_FILTERS, notch filters to be managed by this harmonic notch filter
  */
 template <class T>
 void HarmonicNotchFilter<T>::allocate_filters(uint8_t num_notches, uint32_t harmonics, uint8_t composite_notches)
 {
-    _composite_notches = composite_notches;
+    _composite_notches = MIN(composite_notches, 3);
     _num_harmonics = __builtin_popcount(harmonics);
-    _num_filters = notch_count(num_notches, _num_harmonics, _composite_notches);
+    _num_filters = MIN(_num_harmonics * num_notches * _composite_notches, HAL_HNF_MAX_FILTERS);
     _harmonics = harmonics;
 
     if (_num_filters > 0) {
@@ -415,7 +357,7 @@ void HarmonicNotchFilter<T>::update(uint8_t num_centers, const float center_freq
     // adjust the frequencies to be in the allowable range
     const float nyquist_limit = _sample_freq_hz * HARMONIC_NYQUIST_CUTOFF;
 
-    const uint16_t total_notches = notch_count(num_centers, _num_harmonics, _composite_notches);
+    const uint16_t total_notches = MIN(num_centers * _num_harmonics * _composite_notches, HAL_HNF_MAX_FILTERS);
     if (total_notches > _num_filters) {
         // alloc realloc of filters
         expand_filter_count(total_notches);
@@ -589,7 +531,6 @@ HarmonicNotchFilterParams::HarmonicNotchFilterParams(void)
 
 void HarmonicNotchFilterParams::init()
 {
-    // PARAMETER_CONVERSION - Added: Apr-2024 for ArduPilot-4.5
     _harmonics.convert_bitmask_parameter_width(AP_PARAM_INT8);
 }
 
@@ -622,18 +563,6 @@ uint8_t HarmonicNotchFilterParams::num_composite_notches(void) const
     }
     return 1;
 }
-
-#if HAL_WITH_ESC_TELEM
-// Return the ESC mask to use for ESC tracking
-uint32_t HarmonicNotchFilterParams::esc_mask() const
-{
-    if (_esc_mask.get() == 0) {
-        // Zero is magic value for use all
-        return 0xFFFFFFFF;
-    }
-    return uint32_t(_esc_mask.get());
-}
-#endif // HAL_WITH_ESC_TELEM
 
 
 /* 

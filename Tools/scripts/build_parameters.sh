@@ -16,24 +16,8 @@ PARAMS_DIR="$BUILDLOGS/Parameters"
 generate_parameters() {
     VEHICLE="$1"
 
-    TAG_PREFIX="$VEHICLE"
-    case "$VEHICLE" in
-        ArduCopter) TAG_PREFIX="Copter" ;;
-        ArduPlane) TAG_PREFIX="Plane" ;;
-        ArduSub) TAG_PREFIX="Sub" ;;
-        AntennaTracker) TAG_PREFIX="Tracker" ;;
-    esac
-    GIT_TAG=$(git describe --tags --exact-match --match "$TAG_PREFIX-[0-9]*.[0-9]*.[0-9]*" 2>/dev/null || true)
-    if [ -z "$GIT_TAG" ] && [ "$VEHICLE" = "ArduSub" ]; then
-        GIT_TAG=$(git describe --tags --exact-match --match "ArduSub-[0-9]*.[0-9]*.[0-9]*" 2>/dev/null || true)
-    fi
-
-    # Generate Parameters.html, Parameters.rst etc etc.  The flat files are
-    # release metadata, so do not include the changing commit SHA.
-    GIT_TAG_ARG=""
-    [ -n "$GIT_TAG" ] && GIT_TAG_ARG="--git-tag $GIT_TAG"
-    # shellcheck disable=SC2086
-    ./Tools/autotest/param_metadata/param_parse.py --vehicle $VEHICLE $GIT_TAG_ARG
+    # generate Parameters.html, Parameters.rst etc etc:
+    ./Tools/autotest/param_metadata/param_parse.py --vehicle $VEHICLE
 
     # stash some of the results away:
     VEHICLE_PARAMS_DIR="$PARAMS_DIR/$VEHICLE"
@@ -50,7 +34,9 @@ generate_parameters() {
     F="apm.pdef.json"
     if [ -e "$F" ]; then
 	    /bin/cp "$F" "$VEHICLE_PARAMS_DIR/"
-        xz -e <"$VEHICLE_PARAMS_DIR"/"$F" >"$VEHICLE_PARAMS_DIR"/"$F.xz.new" && mv "$VEHICLE_PARAMS_DIR"/"$F.xz.new" "$VEHICLE_PARAMS_DIR"/"$F.xz"
+        pushd "$VEHICLE_PARAMS_DIR"
+          xz -e <"$F" >"$F.xz.new" && mv "$F.xz.new" "$F.xz"
+        popd
     fi
 }
 

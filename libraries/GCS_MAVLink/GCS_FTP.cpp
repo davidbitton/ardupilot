@@ -120,9 +120,7 @@ bool GCS_FTP::send_reply(const Transaction &reply)
     payload[5] = static_cast<uint8_t>(reply.req_opcode);
     payload[6] = reply.burst_complete ? 1 : 0;
     put_le32_ptr(&payload[8], reply.offset);
-    // only the first size bytes belong to this reply; the packet is zeroed,
-    // so copying just those leaves the rest of it zero
-    memcpy(&pkt.payload[12], reply.data, MIN(reply.size, sizeof(reply.data)));
+    memcpy(&pkt.payload[12], reply.data, sizeof(reply.data));
     mavlink_msg_file_transfer_protocol_send_struct(reply.chan, &pkt);
     return true;
 }
@@ -156,51 +154,8 @@ void GCS_FTP::Session::push_reply(Transaction &reply)
     }
 }
 
-// return a listing entry's last-modification time, or zero if it is unknown.
-// a FAT filesystem with no RTC stamps an entry with its own epoch,
-// 1980-01-01, rather than recording that it does not know when the entry was
-// written. nothing at or before that is a real modification time, so report
-// it as unknown
-static uint32_t gen_dir_entry_mtime(const struct stat &st)
-{
-    const time_t fat_epoch = 315532800;  // 1980-01-01T00:00:00Z
-    return st.st_mtime > fat_epoch ? (uint32_t)st.st_mtime : 0;
-}
-
-// stat the entry named by entry->d_name in the directory path.  returns false
-// if it could not be stat'ed
-static bool gen_dir_entry_stat(const char *path, const struct dirent *entry, struct stat &st)
-{
-#ifdef MAX_NAME_LEN
-    const uint8_t max_name_len = MIN(unsigned(MAX_NAME_LEN), 255U);
-#else
-    const uint8_t max_name_len = 255U;
-#endif  // MAX_NAME_LEN
-    const size_t path_len = strlen(path);
-    const size_t full_path_len = path_len + strnlen(entry->d_name, max_name_len);
-    char full_path[full_path_len + 2];
-    // the path already ends in a separator when the directory being listed is
-    // the root; adding another gives "//name", which is a different place
-    const char *sep = (path_len > 0 && path[path_len - 1] != '/') ? "/" : "";
-    hal.util->snprintf(full_path, sizeof(full_path), "%s%s%s", path, sep, entry->d_name);
-    return AP::FS().stat(full_path, &st) == 0;
-}
-
-// emit a directory's entry in a listing.  the listing format gives every
-// entry a size, and a directory does not have a meaningful one, so it is
-// reported as zero
-static int gen_dir_entry_dir(char *dest, size_t space, const struct dirent *entry, bool with_time, uint32_t mtime)
-{
-    if (with_time) {
-        // D<name>\t<size>\t<mtime>\0 - mtime in seconds since the UNIX epoch (UTC), 0 if unknown
-        return hal.util->snprintf(dest, space, "D%s\t0\t%u%c", entry->d_name, (unsigned)mtime, (char)0);
-    }
-    return hal.util->snprintf(dest, space, "D%s%c", entry->d_name, (char)0);
-}
-
 // calculates how much string length is needed to fit this in a list response
-// when with_time is set, entries also carry their last-modification time
-int GCS_FTP::Session::gen_dir_entry(char *dest, size_t space, const char *path, const struct dirent * entry, bool with_time)
+int GCS_FTP::Session::gen_dir_entry(char *dest, size_t space, const char *path, const struct dirent * entry)
 {
 #if AP_FILESYSTEM_HAVE_DIRENT_DTYPE
     const bool is_file = entry->d_type == DT_REG || entry->d_type == DT_LNK;
@@ -220,45 +175,33 @@ int GCS_FTP::Session::gen_dir_entry(char *dest, size_t space, const char *path, 
     }
 #endif
 
-    if (with_time && strchr(entry->d_name, '\t') != nullptr) {
-        // a tab separates the fields, so the spec has this name sent as a
-        // skip entry
-        return hal.util->snprintf(dest, space, "S%c", (char)0);
-    }
-
     if (is_file) {
+#ifdef MAX_NAME_LEN
+        const uint8_t max_name_len = MIN(unsigned(MAX_NAME_LEN), 255U);
+#else
+        const uint8_t max_name_len = 255U;
+#endif
+        const size_t full_path_len = strlen(path) + strnlen(entry->d_name, max_name_len);
+        char full_path[full_path_len + 2];
+        hal.util->snprintf(full_path, sizeof(full_path), "%s/%s", path, entry->d_name);
         struct stat st;
-        if (!gen_dir_entry_stat(path, entry, st)) {
+        if (AP::FS().stat(full_path, &st)) {
             return -1;
         }
 
 #if !AP_FILESYSTEM_HAVE_DIRENT_DTYPE
         if (S_ISDIR(st.st_mode)) {
-            return gen_dir_entry_dir(dest, space, entry, with_time, gen_dir_entry_mtime(st));
+            return hal.util->snprintf(dest, space, "D%s%c", entry->d_name, (char)0);
         }
 #endif
-        if (with_time) {
-            // F<name>\t<size>\t<mtime>\0 - mtime in seconds since the UNIX epoch (UTC), 0 if unknown
-            return hal.util->snprintf(dest, space, "F%s\t%u\t%u%c", entry->d_name, (unsigned)st.st_size, (unsigned)gen_dir_entry_mtime(st), (char)0);
-        }
         return hal.util->snprintf(dest, space, "F%s\t%u%c", entry->d_name, (unsigned)st.st_size, (char)0);
+    } else {
+        return hal.util->snprintf(dest, space, "D%s%c", entry->d_name, (char)0);
     }
-
-    uint32_t mtime = 0;
-    if (with_time) {
-        // a listing with times has to stat the directory too; one which
-        // cannot be stat'ed is still listed, with an unknown time
-        // (ESP32 is known to have problems stat'ing directories)
-        struct stat st;
-        if (gen_dir_entry_stat(path, entry, st)) {
-            mtime = gen_dir_entry_mtime(st);
-        }
-    }
-    return gen_dir_entry_dir(dest, space, entry, with_time, mtime);
 }
 
 // list the contents of a directory, skip the offset number of entries before providing data
-void GCS_FTP::Session::list_dir(Transaction &request, Transaction &response, bool with_time)
+void GCS_FTP::Session::list_dir(Transaction &request, Transaction &response)
 {
     response.offset = request.offset; // this should be set for any failure condition for debugging
 
@@ -293,11 +236,8 @@ void GCS_FTP::Session::list_dir(Transaction &request, Transaction &response, boo
         }
 
         // check how much space would be needed to emit the listing
-        const int needed_space = gen_dir_entry((char *)response.data, sizeof(request.data), (char *)request.data, entry, with_time);
+        const int needed_space = gen_dir_entry((char *)response.data, sizeof(request.data), (char *)request.data, entry);
 
-        // an entry needing more than a whole packet can never be sent. both
-        // loops must agree on which entries are skipped or the offsets they
-        // are counting drift apart
         if (needed_space < 0 || needed_space > (int)sizeof(request.data)) {
             continue;
         }
@@ -310,31 +250,20 @@ void GCS_FTP::Session::list_dir(Transaction &request, Transaction &response, boo
     struct dirent *entry;
     while ((entry = AP::FS().readdir(dir))) {
         // figure out if we can fit the file
-        const int required_space = gen_dir_entry((char *)(response.data + index), sizeof(response.data) - index, (char *)request.data, entry, with_time);
+        const int required_space = gen_dir_entry((char *)(response.data + index), sizeof(response.data) - index, (char *)request.data, entry);
 
         // couldn't ever send this so drop it
         if (required_space < 0) {
             continue;
         }
 
-        // this entry doesn't fit in a packet of its own, so no later list
-        // will be able to send it either. dropping it loses one file from
-        // the listing; breaking here would end the listing at an EndOfFile
-        // and lose every file after it as well
-        if (required_space > (int)sizeof(response.data)) {
-            continue;
-        }
-
         // can't fit it in this one, leave it for the next list to send
-        if ((required_space + index) > (int)sizeof(request.data)) {
+        if ((required_space + index) >= (int)sizeof(request.data)) {
             break;
         }
 
-        // step the index forward and keep going. required_space already
-        // includes the entry's null terminator (the trailing "%c" with a 0),
-        // so we must not add another - a stray second null would appear as an
-        // empty entry to clients, inflating their offset across paged listings.
-        index += required_space;
+        // step the index forward and keep going
+        index += required_space + 1;
     }
 
     if (index == 0) {
@@ -405,10 +334,7 @@ bool GCS_FTP::Session::handle_request(Transaction &request, Transaction &reply)
         }
         break;
     case FTP_OP::ListDirectory:
-        list_dir(request, reply, false);
-        break;
-    case FTP_OP::ListDirectoryWithTime:
-        list_dir(request, reply, true);
+        list_dir(request, reply);
         break;
     case FTP_OP::OpenFileRO:
     {
@@ -737,11 +663,9 @@ bool GCS_FTP::Session::handle_request(Transaction &request, Transaction &reply)
 
     case FTP_OP::TruncateFile:
     default:
-        // we don't implement this opcode. say so specifically, so a client
-        // preferring a newer opcode can tell "never heard of it" from "that
-        // command failed" and fall back to the older one
+        // this was bad data, just nack it
         GCS_SEND_TEXT(MAV_SEVERITY_DEBUG, "Unsupported FTP: %d", static_cast<int>(request.opcode));
-        GCS_FTP::error(reply, FTP_ERROR::UnknownCommand);
+        GCS_FTP::error(reply, FTP_ERROR::Fail);
         break;
     }
 

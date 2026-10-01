@@ -51,9 +51,6 @@ SECTIONS
     {
         KEEP(*(.vectors))
     } > flash
-    __firmware_crc_start__ = LOADADDR(startup);
-    __firmware_crc_ext_start__ = 0;
-    __firmware_crc_ext_end__ = 0;
 
     constructors : ALIGN(4) SUBALIGN(4)
     {
@@ -173,7 +170,6 @@ SECTIONS
         *(.ram0_init.*)
         . = ALIGN(4);
     } > ram0 AT > flash
-    __firmware_crc_end__ = LOADADDR(.ram0_init) + SIZEOF(.ram0_init);
 
     .ram0 (NOLOAD) : ALIGN(4)
     {

@@ -21,9 +21,31 @@
 
 // optional uprintf() code for debug
 // #define BOOTLOADER_DEBUG SD1
+// #define BOOTLOADER_DEBUG SDU1
 
 #ifndef AP_BOOTLOADER_ALWAYS_ERASE
 #define AP_BOOTLOADER_ALWAYS_ERASE 0
+#endif
+
+#if HAL_USE_SERIAL_USB == TRUE
+static void bootloader_usb_start(void)
+{
+    static bool started;
+    if (started) {
+        return;
+    }
+    started = true;
+    sduObjectInit(&SDU1);
+    sduStart(&SDU1, &serusbcfg1);
+#if HAL_HAVE_DUAL_USB_CDC
+    sduObjectInit(&SDU2);
+    sduStart(&SDU2, &serusbcfg2);
+#endif
+    usbDisconnectBus(serusbcfg1.usbp);
+    thread_sleep_ms(1000);
+    usbStart(serusbcfg1.usbp, &usbcfg);
+    usbConnectBus(serusbcfg1.usbp);
+}
 #endif
 
 #if defined(BOOTLOADER_DEV_LIST)
@@ -331,18 +353,27 @@ extern "C" {
     int vsnprintf(char *str, size_t size, const char *fmt, va_list ap);
 }
 
-// printf to USB for debugging
+// printf to UART or USB for debugging
 void uprintf(const char *fmt, ...)
 {
 #ifdef BOOTLOADER_DEBUG
     va_list ap;
     static bool initialised;
-    static SerialConfig debug_sercfg;
     char umsg[200];
     if (!initialised) {
         initialised = true;
-        debug_sercfg.speed = 57600;
-        sdStart(&BOOTLOADER_DEBUG, &debug_sercfg);
+#if HAL_USE_SERIAL_USB == TRUE
+        if ((void *)&BOOTLOADER_DEBUG == (void *)&SDU1) {
+            bootloader_usb_start();
+        } else
+#endif
+        {
+#if HAL_USE_SERIAL == TRUE
+            static SerialConfig debug_sercfg;
+            debug_sercfg.speed = 57600;
+            sdStart((SerialDriver *)&BOOTLOADER_DEBUG, &debug_sercfg);
+#endif
+        }
     }
     va_start(ap, fmt);
     uint32_t n = vsnprintf(umsg, sizeof(umsg), fmt, ap);
@@ -350,7 +381,7 @@ void uprintf(const char *fmt, ...)
     if (n > sizeof(umsg)) {
         n = sizeof(umsg);
     }
-    chnWriteTimeout(&BOOTLOADER_DEBUG, (const uint8_t *)umsg, n, chTimeMS2I(100));
+    chnWriteTimeout((BaseChannel *)&BOOTLOADER_DEBUG, (const uint8_t *)umsg, n, chTimeMS2I(100));
 #endif
 }
 
@@ -455,17 +486,7 @@ void lock_bl_port(void)
 void init_uarts(void)
 {
 #if HAL_USE_SERIAL_USB == TRUE
-    sduObjectInit(&SDU1);
-    sduStart(&SDU1, &serusbcfg1);
-#if HAL_HAVE_DUAL_USB_CDC
-    sduObjectInit(&SDU2);
-    sduStart(&SDU2, &serusbcfg2);
-#endif
-
-    usbDisconnectBus(serusbcfg1.usbp);
-    thread_sleep_ms(1000);
-    usbStart(serusbcfg1.usbp, &usbcfg);
-    usbConnectBus(serusbcfg1.usbp);
+    bootloader_usb_start();
 #endif
 
 #if HAL_USE_SERIAL == TRUE

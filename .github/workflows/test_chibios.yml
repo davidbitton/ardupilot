@@ -2,16 +2,13 @@ name: test chibios
 
 on:
   push:
-    branches: ['**']  # excludes tag pushes
     paths-ignore:
-      - 'Tools/renode/**'
       # remove non chibios HAL
       - 'libraries/AP_HAL_Linux/**'
       - 'libraries/AP_HAL_ESP32/**'
       - 'libraries/AP_HAL_SITL/**'
       # remove non stm directories
-      - 'Tools/cameras_gimbals/**'
-      - 'Tools/CHDK-Scripts/**'
+      - 'Tools/CHDK-Script/**'
       - 'Tools/CodeStyle/**'
       - 'Tools/completion/**'
       - 'Tools/debug/**'
@@ -22,13 +19,11 @@ on:
       - 'Tools/GIT_Test/**'
       - 'Tools/gittools/**'
       - 'Tools/Hello/**'
-      - 'Tools/Linux_HAL_Essentials/**'
       - 'Tools/mavproxy_modules/**'
       - 'Tools/Pozyx/**'
       - 'Tools/PrintVersion.py'
       - 'Tools/Replay/**'
       - 'Tools/simulink/**'
-      - 'Tools/terrain-tools/**'
       - 'Tools/UDP_Proxy/**'
       - 'Tools/vagrant/**'
       - 'Tools/Vicon/**'
@@ -36,16 +31,12 @@ on:
       - 'Tools/autotest/antennatracker.py'
       - 'Tools/autotest/arduplane.py'
       - 'Tools/autotest/ardusub.py'
-      - 'Tools/autotest/autotest.py'
       - 'Tools/autotest/balancebot.py'
-      - 'Tools/autotest/vehicle_test_suite.py'
-      - 'Tools/autotest/examples.py'
+      - 'Tools/autotest/location.txt'
       - 'Tools/autotest/quadplane.py'
       - 'Tools/autotest/rover.py'
       - 'Tools/autotest/sailboat.py'
-      - 'Tools/autotest/**.txt'
-      - 'Tools/autotest/logger_metadata/**'
-      - 'Tools/autotest/param_metadata/**'
+      - 'Tools/autotest/swarminit.txt'
       # Remove markdown files as irrelevant
       - '**.md'
       # Remove dotfile at root directory
@@ -54,8 +45,10 @@ on:
       - '.editorconfig'
       - '.flake8'
       - '.gitattributes'
+      - '.github'
       - '.gitignore'
       - '.pre-commit-config.yaml'
+      - '.pydevproject'
       - '.valgrind-suppressions'
       - '.valgrindrc'
       - 'Dockerfile'
@@ -63,21 +56,19 @@ on:
       - 'Makefile'
       # Remove some directories check
       - '.vscode/**'
+      - '.github/ISSUE_TEMPLATE/**'
       # Remove change on other workflows
       - '.github/**'
-      - '!.github/actions/**'  # except actions
       - '!.github/workflows/test_chibios.yml'  # except this one
 
   pull_request:
     paths-ignore:
-      - 'Tools/renode/**'
       # remove non chibios HAL
       - 'libraries/AP_HAL_Linux/**'
       - 'libraries/AP_HAL_ESP32/**'
       - 'libraries/AP_HAL_SITL/**'
       # remove non stm directories
-      - 'Tools/cameras_gimbals/**'
-      - 'Tools/CHDK-Scripts/**'
+      - 'Tools/CHDK-Script/**'
       - 'Tools/CodeStyle/**'
       - 'Tools/completion/**'
       - 'Tools/debug/**'
@@ -88,13 +79,12 @@ on:
       - 'Tools/GIT_Test/**'
       - 'Tools/gittools/**'
       - 'Tools/Hello/**'
-      - 'Tools/Linux_HAL_Essentials/**'
+      - 'Tools/LogAnalyzer/**'
       - 'Tools/mavproxy_modules/**'
       - 'Tools/Pozyx/**'
       - 'Tools/PrintVersion.py'
       - 'Tools/Replay/**'
       - 'Tools/simulink/**'
-      - 'Tools/terrain-tools/**'
       - 'Tools/UDP_Proxy/**'
       - 'Tools/vagrant/**'
       - 'Tools/Vicon/**'
@@ -104,7 +94,7 @@ on:
       - 'Tools/autotest/ardusub.py'
       - 'Tools/autotest/autotest.py'
       - 'Tools/autotest/balancebot.py'
-      - 'Tools/autotest/vehicle_test_suite.py'
+      - 'Tools/autotest/common.py'
       - 'Tools/autotest/examples.py'
       - 'Tools/autotest/quadplane.py'
       - 'Tools/autotest/rover.py'
@@ -120,8 +110,10 @@ on:
       - '.editorconfig'
       - '.flake8'
       - '.gitattributes'
+      - '.github'
       - '.gitignore'
       - '.pre-commit-config.yaml'
+      - '.pydevproject'
       - '.valgrind-suppressions'
       - '.valgrindrc'
       - 'Dockerfile'
@@ -129,9 +121,9 @@ on:
       - 'Makefile'
       # Remove some directories check
       - '.vscode/**'
+      - '.github/ISSUE_TEMPLATE/**'
       # Remove change on other workflows
       - '.github/**'
-      - '!.github/actions/**'  # except actions
       - '!.github/workflows/test_chibios.yml'  # except this one
 
   workflow_dispatch:
@@ -140,16 +132,10 @@ concurrency:
   group: ci-${{github.workflow}}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: read  # checkout; jobs that save ccache add actions:write per-job
-
 jobs:
   build:
-    permissions:
-      contents: read
-      actions: write  # save-ccache prunes the previous cache entry
     runs-on: ubuntu-22.04
-    container: ardupilot/ardupilot-dev-${{ matrix.toolchain }}:v0.2.0
+    container: ardupilot/ardupilot-dev-${{ matrix.toolchain }}:v0.1.3
     strategy:
       fail-fast: false  # don't cancel if a job from the matrix fails
       matrix:
@@ -179,28 +165,45 @@ jobs:
         ]
         toolchain: [
             chibios,
+            #chibios-clang,
         ]
         gcc: [10]
+        exclude:
+          - gcc: 10
+            toolchain: chibios-clang
 
     steps:
       # git checkout the PR
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@v6
         with:
           submodules: 'recursive'
-      - uses: ./.github/actions/setup-ccache
+      # Put ccache into github cache for faster build
+      - name: Prepare ccache timestamp
+        id: ccache_cache_timestamp
+        run: |
+          NOW=$(date -u +"%F-%T")
+          echo "timestamp=${NOW}" >> $GITHUB_OUTPUT
+      - name: ccache cache files
+        uses: actions/cache@v5
         with:
-          key-suffix: ${{ matrix.config }}-${{ matrix.toolchain }}-${{ matrix.gcc }}
+          path: ~/.ccache
+          key: ${{github.workflow}}-ccache-${{matrix.config}}-${{ matrix.toolchain }}-${{ matrix.gcc }}-${{steps.ccache_cache_timestamp.outputs.timestamp}}
+          restore-keys: ${{github.workflow}}-ccache-${{matrix.config}}-${{ matrix.toolchain }}-${{ matrix.gcc }}  # restore ccache from either previous build on this branch or on master
+      - name: setup ccache
+        run: |
+          . .github/workflows/ccache.env
       - name: test ${{matrix.config}} ${{ matrix.toolchain }} gcc-${{matrix.gcc}}
         env:
           CI_BUILD_TARGET: ${{matrix.config}}
         shell: bash
         run: |
           git config --global --add safe.directory ${GITHUB_WORKSPACE}
+          if [[ ${{ matrix.toolchain }} == "chibios-clang" ]]; then
+            export CC=clang
+            export CXX=clang++
+          fi
           PATH="/usr/lib/ccache:/opt/gcc-arm-none-eabi-${{matrix.gcc}}/bin:$PATH"
           PATH="/github/home/.local/bin:$PATH"
           Tools/scripts/build_ci.sh
           ccache -s
           ccache -z
-      - uses: ./.github/actions/save-ccache
-        with:
-          key-suffix: ${{ matrix.config }}-${{ matrix.toolchain }}-${{ matrix.gcc }}

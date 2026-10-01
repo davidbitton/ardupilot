@@ -156,7 +156,6 @@ void *AP_Filesystem_ROMFS::opendir(const char *pathname)
     dir[idx].ofs = 0;
     dir[idx].path = strdup(pathname);
     if (!dir[idx].path) {
-        errno = ENOMEM;
         return nullptr;
     }
 
@@ -164,10 +163,7 @@ void *AP_Filesystem_ROMFS::opendir(const char *pathname)
     const char *name = AP_ROMFS::dir_list(dir[idx].path, dir[idx].ofs);
     dir[idx].ofs = 0;
     if (!name) {
-        // Directory does not exist; give the record back
-        free(dir[idx].path);
-        dir[idx].path = nullptr;
-        errno = ENOENT;
+        // Directory does not exist
         return nullptr;
     }
 
@@ -191,10 +187,8 @@ struct dirent *AP_Filesystem_ROMFS::readdir(void *dirp)
         name += plen + 1;
     }
 
-    // Copy full name, truncated if need be so it is always terminated
-    const size_t len = MIN(strlen(name), sizeof(dir[idx].de.d_name)-1);
-    memcpy(dir[idx].de.d_name, name, len);
-    dir[idx].de.d_name[len] = 0;
+    // Copy full name
+    strncpy(dir[idx].de.d_name, name, sizeof(dir[idx].de.d_name));
 
     const char* slash = strchr(name, '/');
     if (slash == nullptr) {
@@ -208,11 +202,9 @@ struct dirent *AP_Filesystem_ROMFS::readdir(void *dirp)
         dir[idx].de.d_type = DT_DIR;
 #endif
 
-        // Add null termination after directory name, if it was not truncated before it
+        // Add null termination after directory name
         const size_t index = slash - name;
-        if (index < len) {
-            dir[idx].de.d_name[index] = 0;
-        }
+        dir[idx].de.d_name[index] = 0;
     }
 
     return &dir[idx].de;

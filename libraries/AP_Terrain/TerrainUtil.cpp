@@ -106,26 +106,26 @@ void AP_Terrain::calculate_grid_info(const Location &loc, struct grid_info &info
  */
 AP_Terrain::grid_cache &AP_Terrain::find_grid_cache(const struct grid_info &info)
 {
-    struct grid_cache *oldest = cache;
+    uint16_t oldest_i = 0;
 
     // see if we have that grid
     const auto now_ms = AP_HAL::millis();
-    for (struct grid_cache *curr = cache; curr != nullptr; curr = curr->next) {
-        if (TERRAIN_LATLON_EQUAL(curr->grid.lat,info.grid_lat) &&
-            TERRAIN_LATLON_EQUAL(curr->grid.lon,info.grid_lon) &&
-            curr->grid.spacing == grid_spacing) {
-            curr->last_access_ms = now_ms;
-            return *curr;
+    for (uint16_t i=0; i<cache_size; i++) {
+        if (TERRAIN_LATLON_EQUAL(cache[i].grid.lat,info.grid_lat) &&
+            TERRAIN_LATLON_EQUAL(cache[i].grid.lon,info.grid_lon) &&
+            cache[i].grid.spacing == grid_spacing) {
+            cache[i].last_access_ms = now_ms;
+            return cache[i];
         }
-        if (curr->last_access_ms < oldest->last_access_ms) {
-            oldest = curr;
+        if (cache[i].last_access_ms < cache[oldest_i].last_access_ms) {
+            oldest_i = i;
         }
     }
 
     // Not found. Use the oldest grid and make it this grid,
     // initially unpopulated
-    struct grid_cache &grid = *oldest;
-    memset(&grid, 0, offsetof(struct grid_cache, next));
+    struct grid_cache &grid = cache[oldest_i];
+    memset(&grid, 0, sizeof(grid));
 
     grid.grid.lat = info.grid_lat;
     grid.grid.lon = info.grid_lon;
@@ -145,26 +145,26 @@ AP_Terrain::grid_cache &AP_Terrain::find_grid_cache(const struct grid_info &info
 }
 
 /*
-  find cache entry of disk_block
+  find cache index of disk_block
  */
-AP_Terrain::grid_cache *AP_Terrain::find_io_cache(enum GridCacheState state)
+int16_t AP_Terrain::find_io_idx(enum GridCacheState state)
 {
     // try first with given state
-    for (struct grid_cache *curr = cache; curr != nullptr; curr = curr->next) {
-        if (TERRAIN_LATLON_EQUAL(disk_block.block.lat,curr->grid.lat) &&
-            TERRAIN_LATLON_EQUAL(disk_block.block.lon,curr->grid.lon) &&
-            curr->state == state) {
-            return curr;
+    for (uint16_t i=0; i<cache_size; i++) {
+        if (TERRAIN_LATLON_EQUAL(disk_block.block.lat,cache[i].grid.lat) &&
+            TERRAIN_LATLON_EQUAL(disk_block.block.lon,cache[i].grid.lon) &&
+            cache[i].state == state) {
+            return i;
         }
     }    
     // then any state
-    for (struct grid_cache *curr = cache; curr != nullptr; curr = curr->next) {
-        if (TERRAIN_LATLON_EQUAL(disk_block.block.lat,curr->grid.lat) &&
-            TERRAIN_LATLON_EQUAL(disk_block.block.lon,curr->grid.lon)) {
-            return curr;
+    for (uint16_t i=0; i<cache_size; i++) {
+        if (TERRAIN_LATLON_EQUAL(disk_block.block.lat,cache[i].grid.lat) &&
+            TERRAIN_LATLON_EQUAL(disk_block.block.lon,cache[i].grid.lon)) {
+            return i;
         }
     }    
-    return nullptr;
+    return -1;
 }
 
 /*

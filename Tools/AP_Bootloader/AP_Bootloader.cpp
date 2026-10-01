@@ -86,6 +86,10 @@ int main(void)
 
     bool try_boot = false;
     uint32_t timeout = HAL_BOOTLOADER_TIMEOUT;
+#ifdef BOOTLOADER_DEBUG
+    uint8_t dbg_fw = 0;
+    uint8_t dbg_wd = 0;
+#endif
 
 #ifdef HAL_BOARD_AP_PERIPH_ZUBAXGNSS
     // setup remapping register for ZubaxGNSS
@@ -128,6 +132,9 @@ int main(void)
     }
 #if AP_CHECK_FIRMWARE_ENABLED
     const auto ok = check_good_firmware();
+#ifdef BOOTLOADER_DEBUG
+    dbg_fw = (uint8_t)ok;
+#endif
     if (ok != check_fw_result_t::CHECK_FW_OK) {
         // bad firmware CRC, don't try and boot
         timeout = 0;
@@ -163,9 +170,15 @@ int main(void)
         stm32_watchdog_clear_reason();
         try_boot = false;
         timeout = 0;
+#ifdef BOOTLOADER_DEBUG
+        dbg_wd = 1;
+#endif
     }
 #elif AP_CHECK_FIRMWARE_ENABLED
     const auto ok = check_good_firmware();
+#ifdef BOOTLOADER_DEBUG
+    dbg_fw = (uint8_t)ok;
+#endif
     if (ok != check_fw_result_t::CHECK_FW_OK) {
         // bad firmware, don't try and boot
         timeout = 0;
@@ -207,6 +220,14 @@ int main(void)
     if (try_boot) {
         jump_to_app();
     }
+
+#ifdef BOOTLOADER_DEBUG
+    for (uint8_t i = 0; i < 20; i++) {
+        uprintf("BL stay try_boot=%u timeout=%u wd=%u fw=%u\n",
+                (unsigned)try_boot, (unsigned)timeout, (unsigned)dbg_wd, (unsigned)dbg_fw);
+        thread_sleep_ms(200);
+    }
+#endif
 
 #if defined(BOOTLOADER_DEV_LIST)
     init_uarts();

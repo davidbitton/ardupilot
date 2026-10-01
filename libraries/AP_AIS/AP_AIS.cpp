@@ -128,7 +128,7 @@ void AP_AIS::update()
                     log_raw(&_incoming);
                 }
 #endif
-                continue;
+                break;
             }
 #if HAL_LOGGING_ENABLED
             if (log_all) {
@@ -144,12 +144,12 @@ void AP_AIS::update()
                     log_raw(&_incoming);
 #endif
                 }
-            } else if (_incoming.num == _incoming.total && _incoming.total > 1) {
+            } else if (_incoming.num == _incoming.total) {
                 // last part of a multi part message
                 uint8_t index = 0;
 
                 // We have the last part, need to find preceding fragments
-                const uint8_t parts = _incoming.total - 1;
+                const uint8_t parts = _incoming.num - 1;
 
                 uint8_t msg_parts[parts];
                 for  (uint8_t i = 0; i < AIVDM_BUFFER_SIZE; i++) {
@@ -179,7 +179,7 @@ void AP_AIS::update()
                     for (uint8_t i = 0; i < index; i++) {
                         buffer_shift(msg_parts[i]);
                     }
-                    continue;
+                    break;
                 }
 
                 // combine packets
@@ -189,9 +189,8 @@ void AP_AIS::update()
                     s.append(_AIVDM_buffer[msg_parts[i]].payload, strlen(_AIVDM_buffer[msg_parts[i]].payload));
                 }
                 s.append(_incoming.payload, strlen(_incoming.payload));
+#if HAL_LOGGING_ENABLED
                 const bool decoded = payload_decode(s.get_string());
-#if !HAL_LOGGING_ENABLED
-                (void)decoded;
 #endif
                 for (uint8_t i = 0; i < index; i++) {
 #if HAL_LOGGING_ENABLED
@@ -242,7 +241,7 @@ void AP_AIS::update()
     const uint32_t deadline = now - timeout;
     for (uint16_t i = 0; i < _list.max_items(); i++) {
         if (_list[i].last_update_ms < deadline && _list[i].last_update_ms != 0) {
-            _list[i].reset();
+            clear_list_item(i);
         }
     }
 }
@@ -317,7 +316,7 @@ void AP_AIS::send_to_object_avoidance_database(const struct ais_vehicle_t &vesse
     // on vessels longer than 1022m or wider than 126m
     // There is currently no real vessel that would cause this.
 
-    if (vessel.info.heading > 360 * 100) {
+    if ((vessel.info.heading == 0) || (vessel.info.heading > 360 * 100)) {
         // Heading invalid, use max dimension as radius
         float radius = vessel.info.dimension_bow;
         radius = MAX(radius, vessel.info.dimension_stern);
@@ -356,8 +355,7 @@ bool AP_AIS::check_location(int32_t lat, int32_t lng) const
         return false;
     }
 
-
-    // Invalid lon is sent as 181 degrees and invalid lat as 91. Check both at in range
+    // Invalid lat is sent as 181 degrees and invalid lon as 91. Check both at in range
     return check_latlng(lat, lng);
 }
 
@@ -397,10 +395,9 @@ bool AP_AIS::get_vessel_index(uint32_t mmsi, uint16_t &index, int32_t lat, int32
         }
     }
 
-    // got through the list without a match, return the first empty
+    // got through the list without a match
     if (found_empty) {
         index = empty;
-        _list[index].reset();
         _list[index].info.MMSI = mmsi;
         return true;
     }
@@ -410,7 +407,6 @@ bool AP_AIS::get_vessel_index(uint32_t mmsi, uint16_t &index, int32_t lat, int32
         // if we can try and expand
         if (_list.expand(1)) {
             index = list_size;
-            _list[index].reset();
             _list[index].info.MMSI = mmsi;
             return true;
         }
@@ -432,9 +428,9 @@ bool AP_AIS::get_vessel_index(uint32_t mmsi, uint16_t &index, int32_t lat, int32
     float max_dist = 0;
     for (uint16_t i = 0; i < list_size; i++) {
         if (!check_location(_list[i].info.lat, _list[i].info.lon)) {
-            // Replace vessel with invalid location
+            // Remove vessel with invalid location
             index = i;
-            _list[index].reset();
+            clear_list_item(index);
             _list[index].info.MMSI = mmsi;
             return true;
         }
@@ -453,13 +449,19 @@ bool AP_AIS::get_vessel_index(uint32_t mmsi, uint16_t &index, int32_t lat, int32
     dist = loc.get_distance(current_loc);
 
     if (dist < max_dist) {
-        // Replace the furthest vessel
-        _list[index].reset();
+        clear_list_item(index);
         _list[index].info.MMSI = mmsi;
         return true;
     }
 
     return false;
+}
+
+void AP_AIS::clear_list_item(uint16_t index)
+{
+    if (index < _list.max_items()) {
+        memset(&_list[index],0,sizeof(ais_vehicle_t));
+    }
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -580,15 +582,11 @@ bool AP_AIS::decode_position_report(const char *payload, uint8_t type)
     // Rate of turn
     _list[index].set_rot(rot);
 
-    if (check_location(lat, lon)) {
-        // last_update_ms is only set if a valid position is received
-        _list[index].info.lat = lat;
-        _list[index].info.lon = lon;
-        _list[index].last_update_ms = AP_HAL::millis();
-    }
-
-    _list[index].set_heading(head);
-    _list[index].info.navigational_status = nav;
+    _list[index].info.lat = lat; // int32_t [degE7] Latitude
+    _list[index].info.lon = lon; // int32_t [degE7] Longitude
+    _list[index].info.heading = head; // uint16_t [cdeg] True heading
+    _list[index].info.navigational_status = nav; // uint8_t Navigational status
+    _list[index].last_update_ms = AP_HAL::millis();
 
 #if AP_OADATABASE_ENABLED
     send_to_object_avoidance_database(_list[index]);
@@ -661,12 +659,9 @@ bool AP_AIS::decode_base_station_report(const char *payload)
         return true;
     }
 
-    if (check_location(lat, lon)) {
-        // last_update_ms is only set if a valid position is received
-        _list[index].info.lat = lat;
-        _list[index].info.lon = lon;
-        _list[index].last_update_ms = AP_HAL::millis();
-    }
+    _list[index].info.lat = lat; // int32_t [degE7] Latitude
+    _list[index].info.lon = lon; // int32_t [degE7] Longitude
+    _list[index].last_update_ms = AP_HAL::millis();
 
 #if AP_OADATABASE_ENABLED
     send_to_object_avoidance_database(_list[index]);
@@ -899,14 +894,10 @@ bool AP_AIS::decode_class_B_position_report(const char *payload, uint8_t type)
                                     get_bits(payload, 295, 300));
     }
 
-    if (check_location(lat, lon)) {
-        // last_update_ms is only set if a valid position is received
-        _list[index].info.lat = lat;
-        _list[index].info.lon = lon;
-        _list[index].last_update_ms = AP_HAL::millis();
-    }
-
-    _list[index].set_heading(head);
+    _list[index].info.lat = lat;
+    _list[index].info.lon = lon;
+    _list[index].info.heading = head;
+    _list[index].last_update_ms = AP_HAL::millis();
 
 #if AP_OADATABASE_ENABLED
     send_to_object_avoidance_database(_list[index]);
@@ -1092,18 +1083,10 @@ bool AP_AIS::decode_latest_term()
     switch (_term_number) {
         case 1:
             _incoming.total = strtol(_term, NULL, 10);
-            if (_incoming.total == 0) {
-                // Can't have a zero part message
-                _sentence_valid = false;
-            }
             break;
 
         case 2:
             _incoming.num = strtol(_term, NULL, 10);
-            if (_incoming.num > _incoming.total || _incoming.num == 0) {
-                // Fragment cannot be zero, fragment cannot be larger than the total number of fragments
-                _sentence_valid = false;
-            }
             break;
 
         case 3:
@@ -1126,7 +1109,7 @@ bool AP_AIS::decode_latest_term()
             }
             break;
 
-        //case 6, number of fill bits, discarded
+        //case 5, number of fill bits, discarded
     }
     return false;
 }

@@ -31,6 +31,7 @@
 #include <AP_BoardConfig/AP_BoardConfig.h>
 #include <AP_JSON/AP_JSON.h>
 #include <AP_Filesystem/AP_Filesystem.h>
+#include <AP_AHRS/AP_AHRS.h>
 #include <AP_HAL_SITL/HAL_SITL_Class.h>
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 
@@ -149,6 +150,11 @@ float Aircraft::ambient_outside_pressure_Pascal() const
 {
     // FIXME: this includes airflow-related things
     return AP::baro().get_pressure();
+}
+
+void Aircraft::set_precland(SIM_Precland *_precland) {
+    precland = _precland;
+    precland->set_default_location(home.lat * 1.0e-7f, home.lng * 1.0e-7f, static_cast<int16_t>(get_home_yaw()));
 }
 
 /*
@@ -724,6 +730,12 @@ void Aircraft::update_dynamics(const Vector3f &rot_accel)
 {
     WITH_SEMAPHORE(pose_sem);
 
+    // update eas2tas and air density
+#if AP_AHRS_ENABLED
+    eas2tas = AP::ahrs().get_EAS2TAS();
+#endif
+    air_density = SSL_AIR_DENSITY / sq(eas2tas);
+
     const float delta_time = frame_time_us * 1.0e-6f;
 
     // update eas2tas and air density
@@ -1110,32 +1122,15 @@ bool Aircraft::Clamp::clamped(Aircraft &aircraft, const struct sitl_input &input
     return currently_clamped;
 }
 
-// simple battery consumption model
-// does not support the behavior documented by SIM_BATT_VOLTAGE and SIM_BATT_CAP_AH parameters
-void Aircraft::update_battery()
-{
-    // lose 0.7V at full throttle (from the user-specified voltage)
-    battery_voltage = sitl->batt_voltage - 0.7f * fabsf(sitl->throttle);
-    // assume 50A at full throttle
-    battery_current = 50.0f * fabsf(sitl->throttle);
-}
-
-void Aircraft::update_battery(const struct sitl_input &input)
-{
-    update_battery();
-}
-
 void Aircraft::update_external_payload(const struct sitl_input &input)
 {
     external_payload_mass = 0;
 
-#if AP_SIM_SPRAYER_ENABLED
     // update sprayer
-    if (sitl->sprayer_sim.is_enabled()) {
-        sitl->sprayer_sim.update(input);
-        external_payload_mass += sitl->sprayer_sim.payload_mass();
+    if (sprayer && sprayer->is_enabled()) {
+        sprayer->update(input);
+        external_payload_mass += sprayer->payload_mass();
     }
-#endif  // AP_SIM_SPRAYER_ENABLED
 
     {
         const float range = rangefinder_range();
@@ -1148,47 +1143,38 @@ void Aircraft::update_external_payload(const struct sitl_input &input)
     }
 
     // update i2c
-    sitl->i2c_sim.update(*this);
-
-#if AP_SIM_BUZZER_ENABLED
-    // update buzzer
-    if (sitl->buzzer_sim.is_enabled()) {
-        sitl->buzzer_sim.update(input);
+    if (i2c) {
+        i2c->update(*this);
     }
-#endif  // AP_SIM_BUZZER_ENABLED
+
+    // update buzzer
+    if (buzzer && buzzer->is_enabled()) {
+        buzzer->update(input);
+    }
 
     // update grippers
-#if AP_SIM_GRIPPER_ENABLED
-    if (sitl->gripper_sim.is_enabled()) {
-        sitl->gripper_sim.set_alt(hagl());
-        sitl->gripper_sim.update(input);
-        external_payload_mass += sitl->gripper_sim.payload_mass();
+    if (gripper && gripper->is_enabled()) {
+        gripper->set_alt(hagl());
+        gripper->update(input);
+        external_payload_mass += gripper->payload_mass();
     }
-#endif  // AP_SIM_GRIPPER_ENABLED
-#if AP_SIM_GRIPPER_EPM_ENABLED
-    if (sitl->gripper_epm_sim.is_enabled()) {
-        sitl->gripper_epm_sim.update(input);
-        external_payload_mass += sitl->gripper_epm_sim.payload_mass();
+    if (gripper_epm && gripper_epm->is_enabled()) {
+        gripper_epm->update(input);
+        external_payload_mass += gripper_epm->payload_mass();
     }
-#endif  // AP_SIM_GRIPPER_EPM_ENABLED
 
-#if AP_SIM_PARACHUTE_ENABLED
     // update parachute
-    if (sitl->parachute_sim.is_enabled()) {
-        sitl->parachute_sim.update(input);
+    if (parachute && parachute->is_enabled()) {
+        parachute->update(input);
         // TODO: add drag to vehicle, presumably proportional to velocity
     }
-#endif  // AP_SIM_PARACHUTE_ENABLED
 
-#if AP_SIM_PRECLAND_ENABLED
-    // update precland
-    if (sitl->precland_sim.is_enabled()) {
-        sitl->precland_sim.update(get_location());
-        if (sitl->precland_sim._over_precland_base) {
-            local_ground_level += sitl->precland_sim._device_height;
+    if (precland && precland->is_enabled()) {
+        precland->update(get_location());
+        if (precland->_over_precland_base) {
+            local_ground_level += precland->_device_height;
         }
     }
-#endif  // AP_SIM_PRECLAND_ENABLED
 
     // update RichenPower generator
     if (richenpower) {
@@ -1222,7 +1208,9 @@ void Aircraft::update_external_payload(const struct sitl_input &input)
     }
 
 #if AP_TEST_DRONECAN_DRIVERS
-    sitl->dronecan_sim.update();
+    if (dronecan) {
+        dronecan->update();
+    }
 #endif
 
 #if AP_SIM_GPIO_LED_1_ENABLED
@@ -1266,13 +1254,7 @@ void Aircraft::add_shove_forces(Vector3f &rot_accel, Vector3f &body_accel)
         body_accel.z += sitl->shove.z;
     } else {
         sitl->shove.start_ms = 0;
-        // save as well as set: the parameter was written to storage to
-        // ask for the shove, so clearing only the live value leaves
-        // storage still asking for one.  A GCS - or the test suite
-        // putting parameters back after a test - then sees the live
-        // value already at zero and has no reason to write, and the
-        // next reboot loads the old duration and shoves again.
-        sitl->shove.t.set_and_save(0);
+        sitl->shove.t.set(0);
     }
 }
 

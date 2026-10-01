@@ -5,12 +5,6 @@
 /********************************************************************************/
 bool Plane::start_command(const AP_Mission::Mission_Command& cmd)
 {
-    if (control_mode == &mode_auto &&
-        AP_Mission::is_nav_cmd(cmd) &&
-        mission.get_prev_nav_cmd_index() != cmd.index) {
-        reset_alt_offset();
-    }
-
     // default to non-VTOL loiter
     auto_state.vtol_loiter = false;
 
@@ -89,10 +83,7 @@ bool Plane::start_command(const AP_Mission::Mission_Command& cmd)
         break;
 
     case MAV_CMD_NAV_RETURN_TO_LAUNCH:
-        if (!set_mode(mode_rtl, ModeReason::MISSION_CMD)) {
-            // unable to enter RTL, allow the vehicle to try the next command
-            return false;
-        }
+        set_mode(mode_rtl, ModeReason::MISSION_CMD);
         break;
 
     case MAV_CMD_NAV_CONTINUE_AND_CHANGE_ALT:
@@ -1055,7 +1046,8 @@ bool Plane::verify_command_callback(const AP_Mission::Mission_Command& cmd)
 //      we double check that the flight mode is AUTO to avoid the possibility of ap-mission triggering actions while we're not in AUTO mode
 void Plane::exit_mission_callback()
 {
-    if (control_mode == &mode_auto && set_mode(mode_rtl, ModeReason::MISSION_END)) {
+    if (control_mode == &mode_auto) {
+        set_mode(mode_rtl, ModeReason::MISSION_END);
         gcs().send_text(MAV_SEVERITY_INFO, "Mission complete, changing mode to RTL");
     }
 }
@@ -1087,10 +1079,7 @@ bool Plane::verify_landing_vtol_approach(const AP_Mission::Mission_Command &cmd)
                 nav_controller->update_loiter(cmd.content.location, abs_radius, direction);
 
                 if (labs(loiter.sum_cd) > 1 && (loiter.reached_target_alt || loiter.unable_to_achieve_target_alt)) {
-                    Vector3f wind;
-                    // use the estimate even if it is not marked valid,
-                    // to preserve existing behaviour
-                    IGNORE_RETURN(ahrs.get_wind(wind));
+                    Vector3f wind = ahrs.wind_estimate();
                     vtol_approach_s.approach_direction_deg = degrees(atan2f(-wind.y, -wind.x));
                     gcs().send_text(MAV_SEVERITY_INFO, "Selected an approach path of %.1f", (double)vtol_approach_s.approach_direction_deg);
                     vtol_approach_s.approach_stage = VTOLApproach::Stage::ENSURE_RADIUS;

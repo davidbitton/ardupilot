@@ -255,6 +255,9 @@ jump_to_app()
     const auto ok = check_good_firmware();
     if (ok != check_fw_result_t::CHECK_FW_OK) {
         // bad firmware, don't try and boot
+#ifdef BOOTLOADER_DEBUG
+        uprintf("jump fail fw=%u\n", (unsigned)ok);
+#endif
         led_set(LED_BAD_FW);
         return;
     }
@@ -274,6 +277,9 @@ jump_to_app()
      */
     for (uint8_t i=0; i<RESERVE_LEAD_WORDS; i++) {
         if (app_base[i] == 0xffffffff) {
+#ifdef BOOTLOADER_DEBUG
+            uprintf("jump fail erased word %u\n", (unsigned)i);
+#endif
             goto exit;
         }
     }
@@ -283,6 +289,9 @@ jump_to_app()
      * flash area (or we have a bad flash).
      */
     if (app_base[1] < APP_START_ADDRESS) {
+#ifdef BOOTLOADER_DEBUG
+        uprintf("jump fail entry=0x%08x\n", unsigned(app_base[1]));
+#endif
         goto exit;
     }
 
@@ -292,6 +301,9 @@ jump_to_app()
     }
 #else
     if (app_base[1] >= (APP_START_ADDRESS + board_info.fw_size)) {
+#ifdef BOOTLOADER_DEBUG
+        uprintf("jump fail entry=0x%08x size=%u\n", unsigned(app_base[1]), unsigned(board_info.fw_size));
+#endif
         goto exit;
     }
 #endif

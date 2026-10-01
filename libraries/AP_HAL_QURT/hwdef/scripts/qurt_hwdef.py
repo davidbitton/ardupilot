@@ -8,6 +8,7 @@ AP_FLAKE8_CLEAN
 
 import argparse
 import os
+import shlex
 import sys
 
 from dataclasses import dataclass
@@ -54,13 +55,13 @@ class QURTHWDef(hwdef.HWDef):
         self.all_lines.append(line)
         self.alllines.append(line)
 
-        a = self.split_line(line, posix=False)
+        a = shlex.split(line, posix=False)
         if a[0] == 'QURT_SPIDEV':
             self.process_line_qurt_spidev(line, depth, a)
         elif a[0] == 'I2C_BUS':
             self.process_line_i2c_bus(line, depth, a)
 
-        super(QURTHWDef, self).process_line(line, depth, a)
+        super(QURTHWDef, self).process_line(line, depth)
 
     def process_line_undef(self, line, depth, a):
         for u in a[1:]:

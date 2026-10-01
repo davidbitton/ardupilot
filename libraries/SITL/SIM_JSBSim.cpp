@@ -191,9 +191,6 @@ bool JSBSim::start_JSBSim(void)
 
     int p[2];
     int devnull = open("/dev/null", O_RDWR|O_CLOEXEC);
-    if (devnull == -1) {
-        AP_HAL::panic("Unable to open /dev/null");
-    }
     if (pipe(p) != 0) {
         AP_HAL::panic("Unable to create pipe");
     }
@@ -486,7 +483,6 @@ void JSBSim::update(const struct sitl_input &input)
     }
     send_servos(input);
     recv_fdm(input);
-    update_battery();
     adjust_frame_time(rate_hz);
     sync_frame_time();
     drain_control_socket();

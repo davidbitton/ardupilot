@@ -132,9 +132,6 @@ public:
 
     // return desired forward throttle percentage
     float forward_throttle_pct();
-
-    // Functions related to weathervaneing
-    float scale_weathervane_output(float wv_out) const;
     float get_weathervane_yaw_rate_cds(void);
 
     // see if we are flying from vtol point of view
@@ -238,6 +235,9 @@ private:
     // return true if airmode should be active
     bool air_mode_active() const;
 
+    // check for an EKF yaw reset
+    void check_yaw_reset(void);
+    
     // hold hover (for transition)
     void hold_hover(float target_climb_rate_cms);
 
@@ -345,10 +345,7 @@ private:
     // QRTL start altitude, meters
     AP_Int16 qrtl_alt_m;
     AP_Int16 qrtl_alt_min_m;
-
-    // QRTL pause time in seconds
-    AP_Float qrtl_pause_time;
-
+    
     // alt to switch to QLAND_FINAL
     AP_Float land_final_alt_m;
     AP_Float vel_forward_alt_cutoff_m;
@@ -418,6 +415,9 @@ private:
 
     // return which vfwd method to use
     ActiveFwdThr get_vfwd_method(void) const;
+
+    // time we last got an EKF yaw reset
+    uint32_t ekfYawReset_ms;
 
     struct {
         AP_Float gain;
@@ -498,7 +498,6 @@ private:
         QPOS_AIRBRAKE,
         QPOS_POSITION1,
         QPOS_POSITION2,
-        QPOS_PAUSE,
         QPOS_LAND_DESCEND,
         QPOS_LAND_ABORT,
         QPOS_LAND_FINAL,
@@ -529,7 +528,7 @@ private:
         uint32_t last_velocity_match_ms;
         float target_speed_ms;
         float target_accel_mss;
-        uint16_t ahrs_position_NE_reset_count;
+        uint32_t last_pos_reset_ms;
         bool overshoot;
 
         float override_descent_rate_ms;

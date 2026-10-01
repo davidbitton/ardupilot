@@ -31,7 +31,6 @@ import rclpy.node
 import threading
 
 from launch_pytest.tools import process as process_tools
-from ros_helpers import ros_node
 from std_srvs.srv import Trigger
 
 from launch_fixtures import (
@@ -50,6 +49,11 @@ class PreamService(rclpy.node.Node):
         self.service_available_object = threading.Event()
         self.is_armable_object = threading.Event()
         self._client_prearm = self.create_client(Trigger, "/ap/prearm_check")
+
+    def start_node(self):
+        # Add a spin thread.
+        self.ros_spin_thread = threading.Thread(target=lambda node: rclpy.spin(node), args=(self,))
+        self.ros_spin_thread.start()
 
     def prearm_check(self):
         req = Trigger.Request()
@@ -97,10 +101,15 @@ def test_dds_serial_prearm_service_call(launch_context, launch_sitl_copter_dds_s
     process_tools.wait_for_start_sync(launch_context, mavproxy, timeout=WAIT_FOR_START_TIMEOUT)
     process_tools.wait_for_start_sync(launch_context, sitl, timeout=WAIT_FOR_START_TIMEOUT)
 
-    with ros_node(PreamService) as node:
+    rclpy.init()
+    try:
+        node = PreamService()
+        node.start_node()
         node.start_prearm()
         is_armable_flag = node.is_armable_object.wait(timeout=25.0)
         assert is_armable_flag, f"Vehicle not armable."
+    finally:
+        rclpy.shutdown()
     yield
 
 
@@ -117,8 +126,13 @@ def test_dds_udp_prearm_service_call(launch_context, launch_sitl_copter_dds_udp)
     process_tools.wait_for_start_sync(launch_context, mavproxy, timeout=WAIT_FOR_START_TIMEOUT)
     process_tools.wait_for_start_sync(launch_context, sitl, timeout=WAIT_FOR_START_TIMEOUT)
 
-    with ros_node(PreamService) as node:
+    rclpy.init()
+    try:
+        node = PreamService()
+        node.start_node()
         node.start_prearm()
         is_armable_flag = node.is_armable_object.wait(timeout=25.0)
         assert is_armable_flag, f"Vehicle not armable."
+    finally:
+        rclpy.shutdown()
     yield

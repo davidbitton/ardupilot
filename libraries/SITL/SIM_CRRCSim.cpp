@@ -150,7 +150,6 @@ void CRRCSim::update(const struct sitl_input &input)
 {
     send_servos(input);
     recv_fdm(input);
-    update_battery();
     update_position();
     time_advance();
 
